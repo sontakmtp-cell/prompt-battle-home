@@ -324,27 +324,37 @@ together — *"Nếu cả hai điều đó đúng → cân bằng đã đạt."*
 **Failing (2):** 10 and 16, diagnosed below. In both cases the measurement
 contradicts the doc's own stated hypothesis.
 
-### 5.2 Check 10 — the orientation multiplier does not pay for itself
+### 5.2 Check 10 — the orientation penalty belongs to the lattice, not the brain
 
 Criterion: turning to face must beat not turning by more than 10 points.
-Measured: **facing 45.0% vs blind 53.0%** — facing *loses*.
+Measured: **facing 50.0% vs blind 50.0%**.
 
-Direct measurement of the orientation term over 100 seeds:
+Direct measurement of the orientation term (`tools/check10-orientation-histogram.mjs`,
+~62,000 hits each):
 
-| | facing | blind |
-|---|---|---|
-| mean `orientMul` | 932.8 | 929.7 |
-| mean `impactMul` | 928.5 | 929.8 |
-| mean damage per hit | 20.155 | 19.209 |
+| | at the 850 floor | at the 1000 ceiling | mean `orientMul` |
+|---|---|---|---|
+| facing (`rotate: toEnemy`) | **42.0%** | 3.4% | 932.8 |
+| blind (`rotate: hold`) | **45.7%** | 2.9% | 929.7 |
 
-Turning to face buys **3.1 milli-units of orientation (0.33%)**, worth +4.93%
-damage per hit. The entire orientation mechanic spans only 17.6% of damage
-(1000 dead-on vs 850 at ≥90°). Worse, facing dealt **16% more total damage** and
-still lost more matches, so the small gain is not what decides games.
+Turning to face buys **3.1 milli-units of mean orientation (0.33%)**, worth +4.93%
+damage per hit — against a bar that demands a >10-point win-rate swing.
 
-The doc anticipated this: *"Nếu chênh lệch dưới 10% thì hệ số hướng đang quá nhẹ,
-không đáng công code."* The measurement says it is 0.33% on the orientation term
-itself — far below the bar.
+The distribution is the real story: between **42% and 46% of all hits take the
+maximum orientation penalty**, and only ~3% reach the ceiling. The cause is
+structural and it is the same fact check 11 records — **the lattice is bipartite
+by orientation**, so every edge neighbour of an `up` tile is a `down` tile. At any
+contact roughly half of the attacker's tiles present the *wrong* face, and
+rotating the whole body turns the good faces away exactly as fast as it turns the
+bad ones in. The brain has no command that changes which face a given tile
+presents at a given contact.
+
+**This is why the multiplier cannot be tuned into working.** Sweeping
+`ORIENT_BASE` from 850 down to 765 — widening the span from 17.6% to 30.7% —
+changes check 10 *not at all* (50/50 at every value) while eroding check 7's
+blocking margin from 2 to 1. The term the brain can influence is the small
+residual; the term that dominates is fixed by geometry. Full analysis in
+`reports/proposal-checks-10-16.md`.
 
 ### 5.3 Check 14 — resolved by separating two conflated questions
 
@@ -423,6 +433,10 @@ bounding radius is 3,496 milli against the wide wing's 5,971, so a compact body
 concentrates its tiles at the contact point and keeps more of them in reach,
 while the wide body is a larger target that gets pushed around.
 
+The orientation sweep confirms it: check 16 reads 100% at every value of
+`ORIENT_BASE` from 850 down to 765. Widening the orientation span does not touch
+this check, because the check was never about orientation.
+
 ### 5.5 Sample-bot matchup web
 
 Overall win share: Spear 26%, Shield 80%, Flanker 75%, Spinner 70%,
@@ -459,12 +473,14 @@ The matchups form a genuine web rather than a ladder, which is the property
 
 M1's gate is met. What is left is design work that the docs explicitly defer:
 
-1. **Checks 10 and 16 need a decision, not a patch.** They are two readings of the
-   same term: the orientation multiplier spans only 17.6% of damage, which is too
-   little to reward a brain that turns to face (10), while the real penalty on a
-   wide body turns out to be contact density rather than orientation at all (16).
-   The honest fix is to decide the intended dynamic range of the orientation
-   multiplier first, then re-derive both thresholds from it.
+1. **Checks 10 and 16 need a mechanic decision, not a patch.** They look like one
+   problem but are two. Check 10's orientation penalty is pinned by the bipartite
+   lattice — 42% of hits sit at the 850 floor regardless of what the brain does —
+   and sweeping `ORIENT_BASE` from 850 to 765 changes it not at all, so no
+   constant can fix it. Check 16 is not about orientation at all: the wide wing's
+   orientation is *better*, and it loses because a compact body lands 21% more
+   hits. Full analysis, including the three routes available for check 10, in
+   `reports/proposal-checks-10-16.md`.
 2. **Produce the Linux half of the digest** by running `hash100 --seeds 100` on
    the reference VPS and comparing against
    `3bebc8f47d6146917bab1032a82d60d50a7ff97465c7511fecce1b47a7219832`.
