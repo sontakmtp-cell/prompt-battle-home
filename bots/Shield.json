@@ -1,0 +1,402 @@
+{
+  "schemaVersion": 1,
+  "name": "Shield",
+  "triangles": [
+    {
+      "r": 0,
+      "j": 0,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 0,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 4,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 4,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 4,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 4,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 4,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 4,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 4,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 4,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 4,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 4,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 5,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 4,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 4,
+      "o": "up",
+      "type": "motor"
+    }
+  ],
+  "coreIndex": 24,
+  "brain": {
+    "version": 1,
+    "rules": [
+      {
+        "when": {
+          "cmp": [
+            ">",
+            {
+              "field": "self.stuckTicks"
+            },
+            12
+          ]
+        },
+        "move": "strafeRight",
+        "rotate": "toEnemy"
+      },
+      {
+        "when": {
+          "cmp": [
+            "<",
+            {
+              "field": "enemy.dist"
+            },
+            3600
+          ]
+        },
+        "move": "hold",
+        "rotate": "toEnemy"
+      },
+      {
+        "move": "forward",
+        "rotate": "toEnemy"
+      }
+    ]
+  }
+}

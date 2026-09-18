@@ -1,0 +1,17 @@
+{
+  "name": "@promptchien/cli",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "promptchien": "./dist/src/index.js"
+  },
+  "main": "./dist/src/index.js",
+  "dependencies": {
+    "@promptchien/contracts": "workspace:*",
+    "@promptchien/core": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "name": "prompt-chien",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "PROMPT CHIEN - deterministic geometry battler. M1: two bots fight each other.",
+  "packageManager": "pnpm@9.15.9",
+  "engines": {
+    "node": ">=22.11.0"
+  },
+  "scripts": {
+    "build": "tsc -b",
+    "rebuild": "tsc -b --force",
+    "clean": "tsc -b --clean",
+    "test": "node --test \"packages/core/dist/test/*.test.js\"",
+    "check": "npm run build && npm run test",
+    "cli": "node packages/cli/dist/src/index.js",
+    "cli:dev": "npm run build && node packages/cli/dist/src/index.js"
+  },
+  "devDependencies": {
+    "@types/node": "22.20.3",
+    "typescript": "5.9.3"
+  }
+}

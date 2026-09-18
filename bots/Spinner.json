@@ -1,0 +1,354 @@
+{
+  "schemaVersion": 1,
+  "name": "Spinner",
+  "triangles": [
+    {
+      "r": 0,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 1,
+      "j": 4,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 1,
+      "j": 4,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 4,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 2,
+      "j": 4,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 3,
+      "j": 4,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 4,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "up",
+      "type": "scissor"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 4,
+      "j": 4,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 4,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "down",
+      "type": "paper"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "up",
+      "type": "paper"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "down",
+      "type": "scissor"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "up",
+      "type": "scissor"
+    }
+  ],
+  "coreIndex": 20,
+  "brain": {
+    "version": 1,
+    "rules": [
+      {
+        "when": {
+          "cmp": [
+            ">",
+            {
+              "field": "self.stuckTicks"
+            },
+            12
+          ]
+        },
+        "move": "backward",
+        "rotate": "left"
+      },
+      {
+        "when": {
+          "cmp": [
+            ">",
+            {
+              "field": "enemy.dist"
+            },
+            5000
+          ]
+        },
+        "move": "forward",
+        "rotate": "toEnemy"
+      },
+      {
+        "move": "forward",
+        "rotate": "left"
+      }
+    ]
+  }
+}

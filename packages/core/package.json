@@ -1,0 +1,20 @@
+{
+  "name": "@promptchien/core",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/src/index.js",
+  "types": "./dist/src/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/src/index.d.ts",
+      "default": "./dist/src/index.js"
+    }
+  },
+  "dependencies": {
+    "@promptchien/contracts": "workspace:*"
+  },
+  "scripts": {
+    "build": "tsc -b"
+  }
+}

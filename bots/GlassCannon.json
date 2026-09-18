@@ -1,0 +1,317 @@
+{
+  "schemaVersion": 1,
+  "name": "GlassCannon",
+  "triangles": [
+    {
+      "r": 0,
+      "j": 0,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 0,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 1,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 1,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 2,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 0,
+      "j": 3,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 0,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 1,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 2,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 1,
+      "j": 3,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 0,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 1,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 2,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "down",
+      "type": "hammer"
+    },
+    {
+      "r": 2,
+      "j": 3,
+      "o": "up",
+      "type": "hammer"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 1,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 2,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 3,
+      "j": 3,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 1,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 2,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 4,
+      "j": 3,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 0,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 0,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 1,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 2,
+      "o": "up",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "down",
+      "type": "motor"
+    },
+    {
+      "r": 5,
+      "j": 3,
+      "o": "up",
+      "type": "motor"
+    }
+  ],
+  "coreIndex": 10,
+  "brain": {
+    "version": 1,
+    "rules": [
+      {
+        "when": {
+          "cmp": [
+            ">",
+            {
+              "field": "self.stuckTicks"
+            },
+            10
+          ]
+        },
+        "move": "strafeLeft",
+        "rotate": "toEnemy"
+      },
+      {
+        "move": "forward",
+        "rotate": "toEnemy"
+      }
+    ]
+  }
+}

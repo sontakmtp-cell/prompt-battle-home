@@ -1,0 +1,9 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.tmp/
+
+# reports/ is generated output (balance-m1.md, m1-match.json). The hand-written
+# delivery report is the one file in there worth versioning.
+reports/*
+!reports/m1-report.md

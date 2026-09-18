@@ -1,0 +1,7 @@
+{
+  "name": "PROMPT CHIẾN",
+  "description": "Autonomous geometric creature battle arena & strategy simulator. Design with AI. Fight with code.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
+
