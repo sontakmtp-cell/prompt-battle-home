@@ -19,6 +19,7 @@ import {
   baseDamage,
   baseHp,
   computeDamage,
+  commitmentMultiplier,
   diversityMaxHp,
   loadFactorMilli,
   ringRadiusAt,
@@ -485,6 +486,7 @@ interface CandidateHit {
   defenderTri: number;
   damage: number;
   impactMul: number;
+  commitMul: number;
   orientMul: number;
   advantage: 'adv' | 'neutral' | 'disadv';
   atX: number;
@@ -857,7 +859,10 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
     for (const c of contacts) {
       const ai = aIdx[c.aTri]!;
       const bi = bIdx[c.bTri]!;
+
       const impactMul = impactMultiplier(rs, c.approachSpeed);
+      const commitA = commitmentMultiplier(rs, c.ownA);
+      const commitB = commitmentMultiplier(rs, c.ownB);
       const aType = A.geom.tris[ai]!.type;
       const bType = B.geom.tris[bi]!.type;
       const ax = A.wc[ai * 2]!;
@@ -868,7 +873,9 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
       if (aType !== 'motor') {
         const orientMul = orientationMultiplier(A.heading, A.geom.tris[ai]!.o, ax, ay, bx, by);
         const rps = rpsMultiplier(rs, aType, bType);
-        const dmg = computeDamage(rs, baseDamage(rs, aType), rps, impactMul, orientMul);
+        const dmg = Math.trunc(
+          (computeDamage(rs, baseDamage(rs, aType), rps, impactMul, orientMul) * commitA) / 1000,
+        );
         if (dmg > 0) {
           candidates.push({
             attacker: A,
@@ -877,6 +884,7 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
             defenderTri: bi,
             damage: dmg,
             impactMul,
+            commitMul: commitA,
             orientMul,
             advantage: advantageOf(rs, aType, bType),
             atX: c.px,
@@ -889,7 +897,9 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
       if (bType !== 'motor') {
         const orientMul = orientationMultiplier(B.heading, B.geom.tris[bi]!.o, bx, by, ax, ay);
         const rps = rpsMultiplier(rs, bType, aType);
-        const dmg = computeDamage(rs, baseDamage(rs, bType), rps, impactMul, orientMul);
+        const dmg = Math.trunc(
+          (computeDamage(rs, baseDamage(rs, bType), rps, impactMul, orientMul) * commitB) / 1000,
+        );
         if (dmg > 0) {
           candidates.push({
             attacker: B,
@@ -898,6 +908,7 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
             defenderTri: ai,
             damage: dmg,
             impactMul,
+            commitMul: commitB,
             orientMul,
             advantage: advantageOf(rs, bType, aType),
             atX: c.px,
@@ -942,6 +953,7 @@ export function simulate(pkgA: BotPackage, pkgB: BotPackage, opts: SimOptions): 
         damage: cand.damage,
         advantage: cand.advantage,
         impactMul: cand.impactMul,
+        commitMul: cand.commitMul,
         orientMul: cand.orientMul,
       });
       if (dt === d.geom.coreIndex) {

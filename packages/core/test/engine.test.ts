@@ -137,7 +137,10 @@ test('engine: the damage of every hit matches the integer damage formula', () =>
             : attackerType === 'motor'
               ? 0
               : RS.RPS_DISADVANTAGE;
-    const want = computeDamage(RS, baseDamage(RS, attackerType), rps, h.impactMul, h.orientMul);
+    // damage = floor(base * rps * impact * orient / 1e9) then scaled by the
+    // attacker's commitment factor (can_bang.md 10 check 14).
+    const raw = computeDamage(RS, baseDamage(RS, attackerType), rps, h.impactMul, h.orientMul);
+    const want = Math.trunc((raw * h.commitMul) / 1000);
     assert.equal(h.damage, want, `${attackerType} -> ${defenderType} at tick ${h.tick}`);
   }
 });

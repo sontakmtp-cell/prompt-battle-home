@@ -16,6 +16,9 @@ export interface Contact {
   depthMilli: number;
   /** approach speed of the two tiles along the normal, milli-units per tick */
   approachSpeed: number;
+  /** each side's own closing speed along the normal, milli-units per tick */
+  ownA: number;
+  ownB: number;
 }
 
 function project(poly: readonly P[], ax: number, ay: number): [number, number] {
@@ -144,6 +147,8 @@ export function collectContacts(
       const relVx = ta.vx - tb.vx;
       const relVy = ta.vy - tb.vy;
       const approachSpeed = Math.abs(Math.trunc((relVx * nx + relVy * ny) / 1000));
+      const ownA = Math.trunc((ta.vx * nx + ta.vy * ny) / 1000);
+      const ownB = Math.trunc((tb.vx * -nx + tb.vy * -ny) / 1000);
 
       out.push({
         aTri: i,
@@ -155,6 +160,8 @@ export function collectContacts(
         dirIdx: dirIndex(nx, ny),
         depthMilli,
         approachSpeed,
+        ownA: ownA <= 0 ? 0 : ownA,
+        ownB: ownB <= 0 ? 0 : ownB,
       });
     }
   }

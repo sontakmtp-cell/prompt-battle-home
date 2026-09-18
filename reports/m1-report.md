@@ -166,9 +166,13 @@ verdict  : VERIFIED over 1276 ticks (B by core)
 matches, and folds every match into one digest. Two independent runs:
 
 ```
-DIGEST : 5a35d60bbc80fcdee8c32dddb696fd97dcb581931cead82dce0cce280ab18e7e
-DIGEST : 5a35d60bbc80fcdee8c32dddb696fd97dcb581931cead82dce0cce280ab18e7e
+DIGEST : 3bebc8f47d6146917bab1032a82d60d50a7ff97465c7511fecce1b47a7219832
+DIGEST : 3bebc8f47d6146917bab1032a82d60d50a7ff97465c7511fecce1b47a7219832
 ```
+
+> The digest was `5a35d60b…` before the check-14 fix described in 5.3. It changed
+> because the damage model changed; that is expected, and the new value is the one
+> the Linux side must reproduce.
 
 ### 3.4 "Windows/Linux produce the same hash"
 
@@ -268,7 +272,7 @@ Gate **5000** is the only setting that passes the sandbox *and* keeps the matchu
 differentiated: Spinner beats Spear 99–1, **loses to Shield 1–99**, beats Flanker
 63–37, beats GlassCannon 100–0.
 
-### 4.2 Two bugs in the measurement harness itself
+### 4.2 Measurement bugs in the harness itself
 
 - **`Math.min(...arr)` overflowed the call stack** on a 100-seed run
   (`RangeError: Maximum call stack size exceeded`), because a full sweep produces
@@ -278,6 +282,12 @@ differentiated: Spinner beats Spear 99–1, **loses to Shield 1–99**, beats Fl
   80 tiles against a 60-tile block, so it was measuring the tile budget, not
   shape. Rebuilt so both are identical in every countable way (60 tiles, 48
   combat, 12 motors, same brain) and differ only in shape.
+- **Check 8 measured the wrong scenario.** It took the median `r` over *every*
+  hit in a round robin, while `can_bang.md` check 18 defines the scenario as *"a
+  balanced bot charging at full speed into a stationary bot"*. It now measures
+  that, with the round-robin median kept as an info line. This mattered: the
+  mismatch is what made a per-side impact fix *look* like it broke check 8
+  (see 5.3).
 
 A third measurement bug was fixed in an earlier pass: **check 10 was confounded**
 because it compared SPEAR against its own blindfold variant, and SPEAR also
@@ -293,25 +303,26 @@ Full 100-seed run, 2,500 matches, written to `reports/balance-m1.md`.
 
 ### 5.1 Verdicts
 
-**Passing (9):** 2, 6, 7, 8, 12, 13, 15, 19, 20.
+**Passing (10):** 2, 6, 7, 8, 12, 13, 14, 15, 19, 20.
 
 | # | Check | Measured |
 |---|---|---|
-| 2 | mixed triple beats every pure bot | 100% / 100% / 96% |
-| 6 | 70/30 hammer-lean bot stays viable | 0% / 100% / 87% |
+| 2 | mixed triple beats every pure bot | 99% / 100% / 97% |
+| 6 | 70/30 hammer-lean bot stays viable | 0% / 100% / 96% |
 | 7 | RPS invariant | worst margin 14 vs 12 |
-| 8 | impact calibration | median r = 1.000 over 175,995 hits |
-| 12 | match duration | p10 22.3s, **p50 46.7s**, p90 98.4s |
-| 13 | motor hunting leverage | hunter wins 0.0% |
-| 15 | flanking still viable | Flanker beats Spear 88% |
+| 8 | impact calibration | charger-vs-stander median r = 0.980 over 84,717 hits |
+| 12 | match duration | p10 24.8s, **p50 54.3s**, p90 100.6s |
+| 13 | motor hunting leverage | hunter wins 2.0% |
+| 14 | defending is not free | stander 148,723 vs charger 196,224 (**75.7%**) |
+| 15 | flanking still viable | Flanker beats Spear 87% |
 | 19 | damage never makes a bot faster | 0 violations |
 | 20 | losing motors costs speed | verified across checkpoints |
 
 `can_bang.md` names the balance acceptance criterion as checks **2 and 6**
 together — *"Nếu cả hai điều đó đúng → cân bằng đã đạt."* Both pass.
 
-**Failing (3):** 10, 14, 16. All three are diagnosed below, and in two cases the
-measurement contradicts the doc's own stated hypothesis.
+**Failing (2):** 10 and 16, diagnosed below. In both cases the measurement
+contradicts the doc's own stated hypothesis.
 
 ### 5.2 Check 10 — the orientation multiplier does not pay for itself
 
@@ -335,51 +346,61 @@ The doc anticipated this: *"Nếu chênh lệch dưới 10% thì hệ số hư�
 không đáng công code."* The measurement says it is 0.33% on the orientation term
 itself — far below the bar.
 
-### 5.3 Check 14 — the threshold is unreachable with the spec's own constants
+### 5.3 Check 14 — resolved by separating two conflated questions
 
 Criterion: the standing bot must deal **< 80%** of the charging bot's damage.
-Measured: **100.0%** (stander 140,103 vs charger 139,985).
+Was **100.0%**; now **75.7%** (stander 148,723 vs charger 196,224). **PASS.**
 
-This is not a bug — it is arithmetic. The impact multiplier is
-`850 + 150 × min(r,1000)/1000`, so it ranges over `[850, 1000]`. For identical
-base, RPS and orientation:
+This took some work, because the obvious fixes each broke something else. The
+full analysis and the measured option table are in `reports/proposal-check14.md`;
+in short:
+
+1. `r` is the **relative** closing speed, so it is the same number for both
+   sides. Both attackers therefore get the same impact multiplier and the ratio
+   is exactly `100%` for **any** value of `IMPACT_BASE` — the asymmetry is
+   structurally absent, so a per-side term is required.
+2. But a per-side term folded into the impact multiplier pollutes check 8, which
+   derives `r` by **inverting** the multiplier the engine reported. Measured:
+   round-robin median `r` collapses from 1.000 to 0.500.
+3. Lowering `IMPACT_BASE` instead breaks **check 7**, the blocking RPS invariant,
+   whose margin at the quoted constants is only **2** (`14 vs 12`). Check 14 needs
+   `IMPACT_BASE < 800`; check 7 needs `IMPACT_BASE >= 765`. Measured: check 7
+   fails at 750.
+4. `RPS_ADVANTAGE` cannot rescue check 7 either, because it is jointly pinned
+   with `HAMMER_DAMAGE` by the "Hammer → Scissor perfect = exactly 48" criterion.
+
+There was also a genuine measurement bug: check 8 was taking the median `r` over
+*every* hit in a round robin, while `can_bang.md` check 18 defines the scenario as
+*"a balanced bot charging at full speed into a stationary bot"*. It now measures
+that scenario, with the round-robin median kept as an info line.
+
+**The fix** is to stop making one number answer two questions. "How hard did these
+two things collide?" is physics and belongs to the *relative* speed, which check 8
+calibrates. "How much did this attacker contribute?" is design and belongs to the
+attacker's *own* speed. So the asymmetry moved into its own factor:
 
 ```
-stander / charger >= 850 / 1000 = 0.85
+damage = floor( base × RPS × impact(relative) × orient × commit(own) / 1e12 )
+commit = 675 + floor(325 × min(ownR, 1000) / 1000)
 ```
 
-A stander can therefore **never** deal less than 85% of a charger's damage, and
-the check demands below 80%. Passing would require `IMPACT_BASE <= 799`, which
-contradicts the `850` quoted in `can_bang.md` 3.3.
+A bot that does not drive into the contact gets 675; one at full reference speed
+gets 1000, so the perfect-hit ceiling (Hammer → Scissor = 48) is preserved exactly,
+and parallel motion still prices as a graze because the relative term still sets
+the impact. `IMPACT_BASE` is untouched, which is why checks 7, 8 and 12 all stay
+green at every value of the new constant.
 
-**The prescribed fix was implemented and measured.** The doc's switch is *"tách
-hệ số va chạm theo từng bên (dùng vận tốc riêng của bên tấn công chiếu lên pháp
-tuyến)"* — price each attacker by its own closing speed instead of a shared
-relative one. Taken literally that has a flaw: two bots travelling in parallel at
-the same speed have zero relative approach but a large "own" speed, so a glancing
-touch would price as a full-speed impact. The version tested was therefore
-`min(relative, own)` — the relative term keeps the physics honest, the own term
-is what the doc asks for. A stander floors at `IMPACT_BASE` while a charger
-reaches the ceiling, and parallel motion still prices as a graze.
+| configuration | check 7 | check 8 | check 12 | check 14 |
+|---|---|---|---|---|
+| as first shipped | PASS | PASS 1.000 | PASS | FAIL 100.0% |
+| doc's switch (per-side impact) | PASS | PASS 0.973 | PASS | FAIL 88.5% |
+| …+ `IMPACT_BASE` 800/200 | PASS | FAIL 0.735 | PASS | FAIL 85.5% |
+| …+ `IMPACT_BASE` 750/250 | **FAIL** | PASS 0.960 | PASS | FAIL 82.3% |
+| …+ `IMPACT_BASE` 700/300 | **FAIL** | PASS 0.943 | PASS | PASS 77.6% |
+| **shipped — commitment factor 675/325** | **PASS** | **PASS 0.980** | **PASS** | **PASS 75.7%** |
 
-| check | before | with `min(relative, own)` |
-|---|---|---|
-| **14** defending is not free | 100.0% | **88.5%** (still > 80%) |
-| **8** impact calibration (median r) | 1.000 PASS | **0.500 FAIL** |
-| **10** facing vs blind | 45.0% vs 53.0% | 12.5% vs 87.5% |
-
-The fix does what it was asked to do — defending stops being free — but it lands
-at 88.5%, still over the bar, **and it breaks check 8**, because pricing each side
-by its own motion drags the median `r` down to 0.5 and the calibration band is
-0.80–1.20. It also makes check 10 markedly worse.
-
-The change was **reverted** (the determinism digest returns to its exact previous
-value, `5a35d60b…`, confirming the revert is behaviour-identical). The conclusion
-is that check 14 cannot be satisfied by the prescribed mechanism alone: its
-threshold is equivalent to demanding `IMPACT_BASE < 800`, and any mechanism that
-gets a stander's `r` to 0 also moves the population median `r` out of check 8's
-band. **Checks 8 and 14 are in direct conflict, and `can_bang.md`'s own constants
-cannot satisfy both.**
+675/325 was chosen for real headroom: 700 passes at 78.8% (only 1.2 points of
+margin) and 650 passes at 72.9% but flips a fairness test — see 6.6.
 
 ### 5.4 Check 16 — not an orientation tax; it is contact density
 
@@ -438,19 +459,32 @@ The matchups form a genuine web rather than a ladder, which is the property
 
 M1's gate is met. What is left is design work that the docs explicitly defer:
 
-1. **Reconcile checks 8 / 10 / 14 / 16.** They are one design problem seen from
-   four sides. The orientation term is too weak to reward a brain decision (10)
-   and the impact term's range makes the defending-discount check unreachable
-   (14), while the mechanism the doc prescribes for 14 breaks the impact
-   calibration (8). Meanwhile the real shape penalty is contact density, not
-   orientation (16). The honest fix is to decide the intended dynamic range of
-   the impact and orientation multipliers *first*, then re-derive all four
-   thresholds from it — not to tune the four checks independently.
+1. **Checks 10 and 16 need a decision, not a patch.** They are two readings of the
+   same term: the orientation multiplier spans only 17.6% of damage, which is too
+   little to reward a brain that turns to face (10), while the real penalty on a
+   wide body turns out to be contact density rather than orientation at all (16).
+   The honest fix is to decide the intended dynamic range of the orientation
+   multiplier first, then re-derive both thresholds from it.
 2. **Produce the Linux half of the digest** by running `hash100 --seeds 100` on
    the reference VPS and comparing against
-   `5a35d60bbc80fcdee8c32dddb696fd97dcb581931cead82dce0cce280ab18e7e`.
+   `3bebc8f47d6146917bab1032a82d60d50a7ff97465c7511fecce1b47a7219832`.
 3. **Consider dropping the diversity resonance** (finding 5.6).
 4. **Revisit SPEAR's back-off rule** (finding 5.6).
 5. M2 is the local-first web lab — draft, version and queue on `localStorage`.
    Account, database, auth and matchmaking are M3 and are deliberately not
    treated as done.
+6. **The mirrored-bot fairness test is fragile and should be reformulated.**
+   `determinism.test.ts` asserts that two identical bots in mirrored poses score
+   *identically*. That holds at `IMPACT_COMMIT_BASE = 675` and above, but breaks at
+   650, where the symmetry goes at tick 272 (scores 750 vs 829). The commitment
+   factor is not the cause — it computes mirrored inputs to mirrored outputs and is
+   provably symmetric. The cause is the pre-existing order-dependent tie-break in
+   the separation step, which means the engine never structurally guaranteed
+   per-match mirror symmetry; the test simply happens to pass for many parameter
+   values. It should assert the property that *is* guaranteed — zero label bias
+   over many seeds — instead of per-match mirror equality.
+7. **The damage formula is now five factors, not four.** `can_bang.md` 3.3 states
+   four. The alternative is to fold the commitment term into the impact
+   multiplier, which is what the doc prescribes — and that is exactly what
+   collides with check 8. The trade is one extra factor in exchange for keeping
+   the blocking RPS invariant and the calibration check intact.

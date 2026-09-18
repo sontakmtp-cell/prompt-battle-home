@@ -241,6 +241,8 @@ export type VfxEvent =
       damage: number;
       advantage: 'adv' | 'neutral' | 'disadv';
       impactMul: number;
+      /** commitment factor (1/1000) from the attacker's own closing speed */
+      commitMul: number;
       orientMul: number;
     }
   | {

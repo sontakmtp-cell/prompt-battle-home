@@ -387,20 +387,60 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
   // ---- 8 / 18. impact reference calibration ------------------------------
   report('impact reference calibration');
   {
-    const r = playPair(MIXED_TRIPLE, PURE_HAMMER, S3, rs, true);
-    const rMilli = r.impactRMilli.length > 0 ? median(r.impactRMilli) : 0;
+    // can_bang.md 10 check 18 defines the scenario explicitly: "a balanced bot
+    // charging at full speed into a stationary bot - measure the actual r". The
+    // pass/fail number is therefore taken from that scenario, which is the only
+    // thing that tells us IMPACT_REF_SPEED is calibrated rather than pinned.
+    //
+    // The median over EVERY hit in a round robin is kept as an info line: it is
+    // a useful wider view, but it mixes in glancing contacts and (once the
+    // impact term is priced per side) it no longer measures calibration at all.
+    const chargeRows = ['HHHHH', 'HHHHH', 'HHHHH', 'HHHHH', 'MMMMM', 'MMMMM'];
+    const stander: BotDefinition = {
+      schemaVersion: 1,
+      name: 'CalibStander',
+      triangles: gridToTriangles(chargeRows),
+      coreIndex: coreIndexOf(chargeRows, 2, 2),
+      brain: { version: 1, rules: [{ move: 'hold', rotate: 'hold' }] },
+    };
+    const charger: BotDefinition = {
+      schemaVersion: 1,
+      name: 'CalibCharger',
+      triangles: gridToTriangles(chargeRows),
+      coreIndex: coreIndexOf(chargeRows, 2, 2),
+      brain: { version: 1, rules: [{ move: 'forward', rotate: 'toEnemy' }] },
+    };
+    // playPair mixes both teams' hits, so the charging side's approach has to be
+    // collected separately - the stander's hits all carry r = 0 by definition.
+    const ph = lockBot(charger, rs);
+    const ps = lockBot(stander, rs);
+    const chargeR: number[] = [];
+    for (const seed of S3) {
+      const { replay } = simulate(ph, ps, { seed, ruleset: rs, recordReplay: true });
+      for (const ev of replay.events) {
+        if (ev.kind !== 'hit' || ev.attackerTeam !== 'A') continue;
+        chargeR.push(Math.trunc(((ev.impactMul - rs.IMPACT_BASE) * 1000) / rs.IMPACT_RANGE));
+      }
+    }
+    const rMilli = chargeR.length > 0 ? median(chargeR) : 0;
+
+    const wide = playPair(MIXED_TRIPLE, PURE_HAMMER, S3, rs, true);
+    const wideMilli = wide.impactRMilli.length > 0 ? median(wide.impactRMilli) : 0;
+
     checks.push({
       id: 8,
       name: 'IMPACT_REF_SPEED calibration (r)',
       criterion: 'median r between 0.80 and 1.20',
-      measured: `median r = ${(rMilli / 1000).toFixed(3)} over ${r.impactRMilli.length} hits`,
+      measured:
+        `charger-vs-stander median r = ${(rMilli / 1000).toFixed(3)} over ${chargeR.length} hits ` +
+        `(round-robin median ${(wideMilli / 1000).toFixed(3)} over ${wide.impactRMilli.length} hits, info)`,
       status: rMilli >= 800 && rMilli <= 1200 ? 'pass' : 'fail',
     });
     // NOTE: not Math.min(...arr) - a full 100-seed sweep produces far more hits
     // than the engine can spread onto the argument stack (RangeError).
     let rMin = Number.MAX_SAFE_INTEGER;
     let rMax = 0;
-    for (const v of r.impactRMilli) {
+    for (const v of chargeR) {
       if (v < rMin) rMin = v;
       if (v > rMax) rMax = v;
     }

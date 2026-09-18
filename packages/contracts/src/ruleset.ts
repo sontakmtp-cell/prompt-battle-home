@@ -36,6 +36,10 @@ export interface Ruleset {
   IMPACT_RANGE: number;
   IMPACT_R_MAX: number;
 
+  // ---- commitment factor (1/1000) ---------------------------------------
+  IMPACT_COMMIT_BASE: number;
+  IMPACT_COMMIT_RANGE: number;
+
   // ---- orientation multiplier (1/1000) ----------------------------------
   ORIENT_BASE: number;
   ORIENT_RANGE: number;
@@ -149,6 +153,19 @@ export const DEFAULT_RULESET: Ruleset = {
   IMPACT_BASE: 850,
   IMPACT_RANGE: 150,
   IMPACT_R_MAX: 1000,
+
+  // A contact can never be worth more than the closing speed between the two
+  // tiles, but a bot that does not drive into the contact should not collect
+  // the full multiplier for free either (can_bang.md 10 check 14).
+  // Measured with tools/proposal-commit-sweep.mjs (5 bot round robin, 8 seeds):
+  //   commit 750 -> check 14 reads 82.2%  (over the 80% bar)
+  //   commit 700 -> check 14 reads 78.8%  (only 1.2 points of headroom)
+  //   commit 675 -> check 14 reads 77.5%  <- chosen (all 97 tests still pass)
+  //   commit 650 -> check 14 reads 72.9%, but flips the mirrored-bot fairness
+  //                 test, so it is not safe to ship without fixing that test
+  // Checks 7, 8 and 12 pass at every value, because IMPACT_BASE is untouched.
+  IMPACT_COMMIT_BASE: 675,
+  IMPACT_COMMIT_RANGE: 325,
 
   ORIENT_BASE: 850,
   ORIENT_RANGE: 150,
@@ -380,6 +397,21 @@ export function computeDamage(
   orient: number,
 ): number {
   return Math.trunc((base * rps * impact * orient) / 1_000_000_000);
+}
+
+/**
+ * Commitment factor (1/1000) from the attacker's OWN closing speed.
+ *
+ * can_bang.md 10 check 14: "defending is not free". A bot that does not drive
+ * into the contact should not collect the full multiplier just because the other
+ * bot rammed it. This is deliberately a separate factor from the impact
+ * multiplier: the impact term stays a pure function of the RELATIVE closing
+ * speed, which is what check 8 calibrates, and this term carries the asymmetry.
+ */
+export function commitmentMultiplier(rs: Ruleset, ownSpeed: number): number {
+  const ownRMilli = Math.trunc((ownSpeed * rs.TICK_RATE * 1000) / rs.IMPACT_REF_SPEED);
+  const capped = Math.min(ownRMilli, rs.IMPACT_R_MAX);
+  return rs.IMPACT_COMMIT_BASE + Math.trunc((rs.IMPACT_COMMIT_RANGE * capped) / 1000);
 }
 
 /** Ring radius at a given tick, in milli-units. Identical for sim and renderer. */
