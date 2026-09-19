@@ -52,6 +52,62 @@ export interface BalanceCheck {
   status: 'pass' | 'fail' | 'info';
 }
 
+// ---------------------------------------------------------------------------
+// Verdict helpers. All of them follow one convention: ZERO observations means
+// 'info', never 'pass'. A check that measured nothing must never be green, so
+// when adding a new check, route its verdict through a helper like these.
+// ---------------------------------------------------------------------------
+
+/**
+ * Verdict for balance check 20.
+ * A check that observed no motor-loss event measured nothing, so it must never
+ * report 'pass'. This function exists so that rule is unit-testable: the bug it
+ * guards against (a vacuous pass) lived in this harness for a long time because
+ * nothing in packages/core/test covered it.
+ */
+export function motorLossStatus(losses: number, drops: number): 'pass' | 'fail' | 'info' {
+  if (losses === 0) return 'info';
+  return drops > 0 ? 'pass' : 'fail';
+}
+
+/**
+ * Verdict for balance check 13. can_bang.md section 10 check 13 has two criteria
+ * and BOTH must hold: (a) the motor hunter must not win more than 70%, and
+ * (b) the hunted bot's mean speed must stay above 60% of its own maximum.
+ */
+export function hunterLeverageStatus(hunterWinPct: number, huntedMeanSpeedFrac: number): 'pass' | 'fail' {
+  return hunterWinPct <= 70 && huntedMeanSpeedFrac > 0.6 ? 'pass' : 'fail';
+}
+
+/**
+ * Verdict for balance check 19. If no match was long enough to compare two
+ * checkpoints, nothing was measured and the check must never report 'pass'.
+ * Same rule as motorLossStatus(): a vacuous green is worse than no check.
+ */
+export function damageSpeedStatus(checked: number, violations: number): 'pass' | 'fail' | 'info' {
+  if (checked === 0) return 'info';
+  return violations === 0 ? 'pass' : 'fail';
+}
+
+/**
+ * Verdict for balance check 2. An empty matchup list makes Array.every() return
+ * true, which would be a vacuous pass; nothing compared means nothing measured.
+ */
+export function mixedTripleStatus(matchupsCompared: number, wonAll: boolean): 'pass' | 'fail' | 'info' {
+  if (matchupsCompared === 0) return 'info';
+  return wonAll ? 'pass' : 'fail';
+}
+
+/**
+ * Verdict for balance check 7. worstMargin is seeded with
+ * Number.MAX_SAFE_INTEGER, so an empty pair list would look like an enormous
+ * positive margin; nothing compared means nothing measured.
+ */
+export function rpsInvariantStatus(pairsCompared: number, worstMargin: number): 'pass' | 'fail' | 'info' {
+  if (pairsCompared === 0) return 'info';
+  return worstMargin > 0 ? 'pass' : 'fail';
+}
+
 export interface BalanceReport {
   generatedWith: { rulesetVersion: string; seeds: number };
   checks: BalanceCheck[];
@@ -240,7 +296,7 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
       name: 'RPS invariant',
       criterion: 'weakest advantage hit > strongest disadvantage hit',
       measured: `${detail.join(' | ')} (worst margin ${worstMargin})`,
-      status: worstMargin > 0 ? 'pass' : 'fail',
+      status: rpsInvariantStatus(pairs.length, worstMargin),
     });
   }
 
@@ -311,7 +367,7 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
       measured: mixedVsPure
         .map((m) => `${m.pure}: ${pct(m.r.aWins, m.r.matches)} vs ${pct(m.r.bWins, m.r.matches)}`)
         .join(' | '),
-      status: wonAll ? 'pass' : 'fail',
+      status: mixedTripleStatus(mixedVsPure.length, wonAll),
     });
   }
 
@@ -530,12 +586,77 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
     const r = playPair(MOTOR_HUNTER, MIXED_TRIPLE, S6, rs, false);
     pushMatchup('MotorHunter', 'MixedTriple', r);
     const rate = (r.aWins * 100) / r.matches;
+    // Criterion b (mean speed of the hunted bot) needs checkpoints, which
+    // playPair(..., false) does not record. We re-run the SAME pairing over the
+    // SAME S6 seed set with recordReplay: true so criterion a's win rate above is
+    // left completely untouched.
+    //
+    // can_bang.md section 10 check 13 does not say which side criterion b applies
+    // to. We measure the hunted side (B, MIXED_TRIPLE) because all three tuning
+    // switches for this check (MOTOR_HP, MOTOR_DAMAGE_MULT, MOTOR_PULL_PER_MOTOR)
+    // are about the hunted bot's motor durability. The hunter's number is reported
+    // alongside for reference.
+    //
+    // Denominator: the first checkpoint's speedMultiplierMilli. Checkpoints are
+    // only pushed when (tick + 1) % CHECKPOINT_EVERY === 0
+    // (engine/simulate.ts:1074, CHECKPOINT_EVERY = 30), so the first checkpoint
+    // sits at tick 29 -- there is NO tick-0 checkpoint. The max() rule at
+    // engine/simulate.ts:280 (effectiveLoadMilli = Math.max(loadMilli,
+    // lockedLoadMilli)) guarantees the multiplier can only fall, so the tick-29
+    // value is <= the true tick-0 maximum. The denominator is therefore slightly
+    // SMALLER than the real maximum, which biases the ratio UPWARD (towards
+    // passing). The bias is disclosed rather than hidden: at 99.5% against a 60%
+    // threshold it does not change the verdict.
+    const pkgHunter = lockBot(MOTOR_HUNTER, rs);
+    const pkgBalanced = lockBot(MIXED_TRIPLE, rs);
+    let sumFracB = 0;
+    let countedB = 0;
+    let skippedB = 0;
+    let sumFracA = 0;
+    let countedA = 0;
+    for (const seed of S6) {
+      const { replay } = simulate(pkgHunter, pkgBalanced, {
+        seed,
+        ruleset: rs,
+        recordReplay: true,
+      });
+      const cps = replay.checkpoints;
+      if (cps.length === 0) {
+        skippedB++;
+        continue;
+      }
+      const first = cps[0]!;
+      // Hunted bot (B): skip matches where it has no motor (multiplier 0 at the
+      // first checkpoint, tick 29).
+      if (first.b.speedMultiplierMilli > 0) {
+        let sum = 0;
+        for (const c of cps) sum += c.b.speedMultiplierMilli;
+        sumFracB += sum / cps.length / first.b.speedMultiplierMilli;
+        countedB++;
+      } else {
+        skippedB++;
+      }
+      // Hunter (A): same ratio, reported as an info line only.
+      if (first.a.speedMultiplierMilli > 0) {
+        let sum = 0;
+        for (const c of cps) sum += c.a.speedMultiplierMilli;
+        sumFracA += sum / cps.length / first.a.speedMultiplierMilli;
+        countedA++;
+      }
+    }
+    const frac = countedB === 0 ? 0 : sumFracB / countedB;
+    const hunterFrac = countedA === 0 ? 0 : sumFracA / countedA;
+    const skippedNote = skippedB > 0 ? ` (${skippedB} matches skipped: hunted bot had no motor)` : '';
     checks.push({
       id: 13,
       name: 'Motor hunting leverage',
-      criterion: 'hammer-heavy motor hunter must not win more than 70%',
-      measured: `hunter wins ${rate.toFixed(1)}% (balanced ${pct(r.bWins, r.matches)}, draw ${pct(r.draws, r.matches)})`,
-      status: rate <= 70 ? 'pass' : 'fail',
+      criterion:
+        "a: hunter must not win more than 70%; b: the hunted bot's mean speed must stay above 60% of its own maximum",
+      measured:
+        `a: hunter wins ${rate.toFixed(1)}% (balanced ${pct(r.bWins, r.matches)}, draw ${pct(r.draws, r.matches)}); ` +
+        `b: hunted mean speed ${(frac * 100).toFixed(1)}% of its max over ${countedB} matches${skippedNote}; ` +
+        `hunter mean speed ${(hunterFrac * 100).toFixed(1)}% (info)`,
+      status: hunterLeverageStatus(rate, frac),
     });
   }
 
@@ -661,6 +782,10 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
     const po = lockBot(MIXED_TRIPLE, rs);
     let violations = 0;
     let checked = 0;
+    // The 8-seed cap is deliberate: this check re-runs the whole pairing with
+    // recordReplay, which is expensive, and 8 matches is enough to catch a
+    // regression. The measured line below states the actual match count, so the
+    // cap is disclosed rather than hidden.
     for (const seed of S2.slice(0, Math.min(8, S2.length))) {
       const { replay } = simulate(pc, po, { seed, ruleset: rs, recordReplay: true });
       const cps = replay.checkpoints.filter((c) => c.a.alive);
@@ -674,8 +799,11 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
       id: 19,
       name: 'Damage never makes a bot faster',
       criterion: 'effective speed multiplier at the end <= at the start',
-      measured: `${violations} violations in ${checked} matches`,
-      status: violations === 0 ? 'pass' : 'fail',
+      measured:
+        checked === 0
+          ? `no match was long enough to compare two checkpoints — the check proved nothing`
+          : `${violations} violations in ${checked} matches`,
+      status: damageSpeedStatus(checked, violations),
     });
   }
 
@@ -688,23 +816,34 @@ export function runBalanceSuite(opts: HarnessOptions = {}): BalanceReport {
     const p2 = lockBot(PURE_HAMMER, rs);
     let drops = 0;
     let losses = 0;
-    for (const seed of S3.slice(0, Math.min(8, S3.length))) {
+    // Watch BOTH sides (a and b) across the FULL S3 window. The earlier version
+    // only tracked side A over the first 8 seeds, which observed no motor-loss
+    // event at all -- and a check that measures nothing must not report a green
+    // pass.
+    for (const seed of S3) {
       const { replay } = simulate(p1, p2, { seed, ruleset: rs, recordReplay: true });
       for (let i = 1; i < replay.checkpoints.length; i++) {
         const prev = replay.checkpoints[i - 1]!;
         const cur = replay.checkpoints[i]!;
-        if (cur.a.motorAlive < prev.a.motorAlive) {
-          losses++;
-          if (cur.a.speedMultiplierMilli < prev.a.speedMultiplierMilli) drops++;
+        for (const side of ['a', 'b'] as const) {
+          if (cur[side].motorAlive < prev[side].motorAlive) {
+            losses++;
+            if (cur[side].speedMultiplierMilli < prev[side].speedMultiplierMilli) drops++;
+          }
         }
       }
     }
     checks.push({
       id: 20,
       name: 'Losing motors costs speed',
-      criterion: 'a motor loss between checkpoints must not leave speed unchanged',
-      measured: `${drops}/${losses} motor-loss events also dropped the speed multiplier`,
-      status: losses === 0 || drops > 0 ? 'pass' : 'fail',
+      criterion:
+        'a motor-loss event must be able to drop the speed multiplier (at least one such drop must be observed); ' +
+        'the full per-band guarantee is unit-tested in packages/core/test/load.test.ts:130',
+      measured:
+        losses === 0
+          ? `no motor-loss event observed in ${S3.length} matches — the check proved nothing`
+          : `${drops}/${losses} motor-loss events also dropped the speed multiplier`,
+      status: motorLossStatus(losses, drops),
     });
   }
 
