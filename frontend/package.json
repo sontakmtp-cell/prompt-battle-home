@@ -4,11 +4,13 @@
   "version": "0.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite --port=3000 --host=0.0.0.0",
-    "build": "vite build",
+    "engine:build": "cd .. && npm run build",
+    "dev": "npm run engine:build && vite --port=3000 --host=127.0.0.1",
+    "build": "npm run engine:build && vite build",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
-    "lint": "tsc --noEmit"
+    "lint": "tsc --noEmit",
+    "test": "npm run engine:build && tsx test/sha256.test.ts && tsx test/replay.test.ts && tsx test/art.test.ts && tsx test/render.test.tsx && tsx test/lab.test.ts"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

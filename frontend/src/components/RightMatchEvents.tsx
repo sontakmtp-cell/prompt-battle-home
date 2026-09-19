@@ -1,181 +1,150 @@
-import React from 'react';
-import { MatchEvent } from '../types';
-import { Layers, Activity, AlertTriangle, ShieldAlert, Sparkles, ExternalLink } from 'lucide-react';
+import React, { useMemo, useState } from 'react';
+import type { Team } from '@promptchien/contracts';
 
-interface RightMatchEventsProps {
-  events: MatchEvent[];
-  damageMapActive: boolean;
-  onToggleDamageMap: () => void;
-  onEventClick?: (event: MatchEvent) => void;
+export interface FeedEvent {
+  id: string;
+  tick: number;
+  timeSec: number;
+  title: string;
+  detail: string;
+  kind: string;
+  team: Team | null;
+  critical: boolean;
 }
 
+interface RightMatchEventsProps {
+  events: FeedEvent[];
+  currentTick: number;
+  damageMapActive: boolean;
+  onToggleDamageMap: () => void;
+  onEventClick: (e: FeedEvent) => void;
+  hottest: Array<{ team: Team; index: number; damage: number; destroyedTick: number | null }>;
+}
+
+const KIND_COLOR: Record<string, string> = {
+  hit: 'text-neutral-600',
+  destroy: 'text-amber-700',
+  detach: 'text-orange-700',
+  motorLost: 'text-red-700',
+  overload: 'text-red-700',
+  coreHit: 'text-red-700',
+  coreDestroyed: 'text-red-800',
+  ringStart: 'text-slate-500',
+  ringEnter: 'text-red-700',
+  ringExit: 'text-emerald-700',
+  brainViolation: 'text-purple-700',
+  matchEnd: 'text-neutral-900',
+};
+
+/**
+ * The event feed (gameplay.md 6.1).
+ *
+ * The list is filtered to the current tick, so scrubbing the replay walks the
+ * story forward instead of dumping the whole match at once. `hit` events are the
+ * overwhelming majority - a 40-second match emits well over a thousand - so by
+ * default only the structural events (destruction, detached limbs, Core hits,
+ * the ring) are listed individually, with the raw hits one click away.
+ */
 export const RightMatchEvents: React.FC<RightMatchEventsProps> = ({
   events,
+  currentTick,
   damageMapActive,
   onToggleDamageMap,
   onEventClick,
+  hottest,
 }) => {
-  // Render specific tiny geometric icon for each event
-  const renderGeometricIcon = (event: MatchEvent) => {
-    switch (event.type) {
-      case 'motor':
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-amber-500 shrink-0">
-            <polygon points="8 1, 14 14, 2 14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeDasharray="2 1" />
-            <path d="M8 6 L8 11" stroke="currentColor" strokeWidth="1.5" />
-          </svg>
-        );
-      case 'overload':
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-red-500 shrink-0">
-            <rect x="2" y="2" width="12" height="12" rx="2" transform="rotate(45 8 8)" fill="none" stroke="currentColor" strokeWidth="1.5" />
-            <circle cx="8" cy="8" r="2" fill="currentColor" />
-          </svg>
-        );
-      case 'counter':
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-red-600 shrink-0">
-            {/* Hammer striking Scissor */}
-            <polygon points="6 3, 10 9, 2 9" fill="#dc2626" stroke="#991b1b" strokeWidth="1.2" />
-            <polygon points="12 6, 15 13, 9 13" fill="none" stroke="#2563eb" strokeWidth="1.2" />
-          </svg>
-        );
-      case 'destroyed':
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-neutral-400 shrink-0">
-            {/* Shattered / breaking triangle */}
-            <polygon points="8 2, 13 13, 8 10" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            <polygon points="7 9, 3 13, 6 6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeDasharray="1.5 1.5" />
-          </svg>
-        );
-      case 'core':
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-red-600 shrink-0">
-            <circle cx="8" cy="8" r="5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="3 1" />
-            <polygon points="8 5, 10 10, 6 10" fill="#dc2626" />
-          </svg>
-        );
-      default:
-        return (
-          <svg width="14" height="14" viewBox="0 0 16 16" className="text-blue-500 shrink-0">
-            <polygon points="8 2, 14 13, 2 13" fill="none" stroke="currentColor" strokeWidth="1.4" />
-          </svg>
-        );
-    }
-  };
+  const [showAll, setShowAll] = useState(false);
+
+  const visible = useMemo(() => {
+    const upTo = events.filter((e) => e.tick <= currentTick);
+    const tail = upTo.slice(-400);
+    if (showAll) return tail.slice(-200).reverse();
+    const structural = tail.filter((e) => e.kind !== 'hit' || e.critical);
+    if (structural.length > 0) return structural.slice(-120).reverse();
+    return tail.slice(-60).reverse();
+  }, [events, currentTick, showAll]);
+
+  const hitCount = useMemo(
+    () => events.filter((e) => e.tick <= currentTick && e.kind === 'hit').length,
+    [events, currentTick],
+  );
 
   return (
-    <aside className="w-[270px] bg-white/95 backdrop-blur-md rounded-2xl border border-neutral-200/90 shadow-[0_4px_20px_rgba(0,0,0,0.05)] p-4 flex flex-col gap-3.5 select-none pointer-events-auto">
-      {/* Feed Header */}
-      <div className="flex items-center justify-between pb-2 border-b border-neutral-100">
+    <div className="w-[280px] bg-white/92 backdrop-blur-md rounded-xl border border-neutral-200/90 shadow-[0_2px_8px_rgba(0,0,0,0.04)] flex flex-col max-h-[calc(100vh-260px)] pointer-events-auto">
+      <div className="px-3 py-2 border-b border-neutral-100 flex items-center justify-between">
+        <span className="text-[11px] font-bold font-mono tracking-tight text-neutral-800">SỰ KIỆN</span>
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-3 bg-neutral-900 rounded-xs" />
-          <h3 className="text-[11px] font-mono uppercase tracking-wider text-neutral-800 font-bold">
-            MATCH EVENTS
-          </h3>
-        </div>
-        <span className="text-[10px] font-mono text-neutral-400">
-          LOG 00:35–00:47
-        </span>
-      </div>
-
-      {/* Minimal Event Feed */}
-      <div className="space-y-1.5 overflow-y-auto max-h-[220px] pr-1 scrollbar-thin">
-        {events.map((event) => (
-          <div
-            key={event.id}
-            onClick={() => onEventClick && onEventClick(event)}
-            className="group flex items-start gap-2.5 p-2 rounded-xl hover:bg-neutral-50 border border-transparent hover:border-neutral-200 transition-all cursor-pointer"
-          >
-            {/* Timestamp */}
-            <span className="text-[10px] font-mono font-semibold text-neutral-400 mt-0.5 group-hover:text-neutral-700 transition-colors">
-              {event.timestamp}
-            </span>
-
-            {/* Tiny Geometric Icon */}
-            <div className="mt-0.5">
-              {renderGeometricIcon(event)}
-            </div>
-
-            {/* Event Description */}
-            <div className="flex-1 min-w-0">
-              <div className="text-xs font-semibold text-neutral-900 leading-tight truncate">
-                {event.title}
-              </div>
-              <div className="text-[10px] text-neutral-500 font-mono mt-0.5 line-clamp-1">
-                {event.description}
-              </div>
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Damage Map Mini-Preview */}
-      <div className="pt-2 border-t border-neutral-100">
-        <div className="flex items-center justify-between mb-2">
-          <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500 font-semibold flex items-center gap-1">
-            <Layers className="w-3 h-3 text-neutral-400" />
-            Damage Map
-          </span>
+          <span className="text-[10px] font-mono text-neutral-400">{hitCount} cú đánh</span>
           <button
-            onClick={onToggleDamageMap}
-            className={`text-[10px] font-mono font-semibold px-2 py-0.5 rounded transition-all ${
-              damageMapActive
-                ? 'bg-neutral-900 text-white shadow-2xs'
-                : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
-            }`}
+            type="button"
+            onClick={() => setShowAll((v) => !v)}
+            className="text-[10px] font-mono text-neutral-500 hover:text-neutral-900 border border-neutral-200 rounded px-1"
+            title="Hiện cả những cú đánh lẻ"
           >
-            {damageMapActive ? 'Active' : 'Preview'}
+            {showAll ? 'lọc' : 'tất cả'}
           </button>
         </div>
+      </div>
 
-        {/* Small preview frame */}
-        <div
-          onClick={onToggleDamageMap}
-          className="w-full h-24 bg-neutral-900 rounded-xl overflow-hidden relative cursor-pointer border border-neutral-300 group hover:border-neutral-400 transition-all shadow-inner"
-          title="Click to toggle full arena damage heatmap"
-        >
-          {/* Subtle grid on dark miniature preview */}
-          <div className="absolute inset-0 opacity-20 arena-grid-pattern invert" />
+      <button
+        type="button"
+        onClick={onToggleDamageMap}
+        className={`mx-3 mt-2 px-2 py-1.5 rounded-lg text-[11px] font-semibold border transition-colors text-left ${
+          damageMapActive
+            ? 'bg-neutral-900 text-white border-neutral-900'
+            : 'bg-white text-neutral-600 border-neutral-200 hover:border-neutral-400'
+        }`}
+      >
+        Bản đồ sát thương {damageMapActive ? '· đang bật' : '· đang tắt'}
+      </button>
 
-          {/* Miniature heatmap representation */}
-          <svg viewBox="0 0 200 80" className="w-full h-full p-2">
-            {/* Bot A (Left) - spear stress gradient */}
-            <ellipse cx="65" cy="40" rx="30" ry="18" fill="rgba(234, 88, 12, 0.25)" />
-            <polygon points="85,40 50,28 50,52" fill="none" stroke="#ea580c" strokeWidth="1.2" />
-            <circle cx="85" cy="40" r="4" fill="#dc2626" className="animate-pulse" />
-
-            {/* Impact clash line */}
-            <line x1="86" y1="36" x2="108" y2="44" stroke="#ffffff" strokeWidth="1.5" strokeDasharray="2 1" />
-
-            {/* Bot B (Right) - crescent rupture stress */}
-            <ellipse cx="125" cy="40" rx="28" ry="22" fill="rgba(37, 99, 235, 0.3)" />
-            <path
-              d="M 110,25 C 135,28 135,52 110,55"
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth="1.5"
-            />
-            {/* Ruptured module zone */}
-            <circle cx="108" cy="38" r="6" fill="#ef4444" fillOpacity="0.75" />
-            <circle cx="120" cy="40" r="3" fill="#38bdf8" />
-            
-            {/* Detached debris dots */}
-            <circle cx="98" cy="28" r="1.5" fill="#fca5a5" />
-            <circle cx="104" cy="22" r="1.2" fill="#e2e8f0" opacity="0.6" />
-          </svg>
-
-          <div className="absolute bottom-1.5 left-2 flex items-center gap-1.5 text-[9px] font-mono text-neutral-400">
-            <span className="w-1.5 h-1.5 rounded-full bg-red-500" />
-            <span>Stress: 98% (Peak)</span>
+      {damageMapActive && hottest.length > 0 && (
+        <div className="mx-3 mt-2 rounded-lg border border-neutral-200 bg-neutral-50/70 p-2">
+          <div className="text-[10px] font-bold font-mono text-neutral-500 mb-1">BA Ô ĂN ĐÒN NẶNG NHẤT</div>
+          <div className="flex flex-col gap-0.5">
+            {hottest.map((h) => (
+              <div key={`${h.team}-${h.index}`} className="flex items-center justify-between text-[10px] font-mono">
+                <span className={h.team === 'A' ? 'text-red-700' : 'text-blue-700'}>
+                  {h.team} · ô #{h.index}
+                </span>
+                <span className="text-neutral-500">
+                  {h.damage} dmg{h.destroyedTick !== null ? ` · vỡ nhịp ${h.destroyedTick}` : ''}
+                </span>
+              </div>
+            ))}
           </div>
-
-          <div className="absolute bottom-1.5 right-2 text-[9px] font-mono text-neutral-400 group-hover:text-white transition-colors flex items-center gap-0.5">
-            <span>Overlay</span>
-            <ExternalLink className="w-2.5 h-2.5" />
+          <div className="mt-1.5 flex items-center gap-1">
+            <span className="text-[9px] font-mono text-neutral-400">nhẹ</span>
+            {['#FAC775', '#EF9F27', '#D85A30', '#A32D2D'].map((c) => (
+              <span key={c} className="w-4 h-2 rounded-xs" style={{ background: c }} />
+            ))}
+            <span className="text-[9px] font-mono text-neutral-400">nặng</span>
           </div>
         </div>
+      )}
+
+      <div className="flex-1 overflow-y-auto px-2 py-2 flex flex-col gap-0.5">
+        {visible.length === 0 && (
+          <p className="text-[11px] font-mono text-neutral-400 px-2 py-3">chưa có sự kiện nào</p>
+        )}
+        {visible.map((e) => (
+          <button
+            key={e.id}
+            type="button"
+            onClick={() => onEventClick(e)}
+            className="text-left px-2 py-1 rounded-md hover:bg-neutral-100 transition-colors group"
+          >
+            <div className="flex items-center gap-1.5">
+              <span className="text-[10px] font-mono text-neutral-400 shrink-0 w-9">{e.timeSec.toFixed(1)}s</span>
+              <span className={`text-[11px] font-semibold truncate ${KIND_COLOR[e.kind] ?? 'text-neutral-700'}`}>
+                {e.title}
+              </span>
+              {e.critical && <span className="w-1.5 h-1.5 rounded-full bg-red-500 shrink-0" />}
+            </div>
+            {e.detail && <div className="text-[10px] font-mono text-neutral-400 pl-11 truncate">{e.detail}</div>}
+          </button>
+        ))}
       </div>
-    </aside>
+    </div>
   );
 };

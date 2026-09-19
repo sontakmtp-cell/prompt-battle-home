@@ -19,6 +19,12 @@
     "paths": {
       "@/*": [
         "./*"
+      ],
+      "@promptchien/contracts": [
+        "../packages/contracts/dist/src/index.d.ts"
+      ],
+      "@promptchien/core": [
+        "../packages/core/dist/src/index.d.ts"
       ]
     },
     "allowImportingTsExtensions": true,

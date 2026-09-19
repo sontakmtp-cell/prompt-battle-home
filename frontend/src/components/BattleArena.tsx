@@ -1,877 +1,678 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { BotData, TriangleCell, TriangleType } from '../types';
+import React, { useMemo, useRef, useState } from 'react';
+import { rotateOffset } from '@promptchien/core';
+import { ReplayView, type BotView, type FrameView } from '../lab/replay';
+import {
+  ARENA,
+  ARENA_VIEWBOX,
+  CORE_BADGE,
+  CRACK_BELOW_MILLI,
+  CRACK_STRONG_BELOW_MILLI,
+  DETACHED_FILL,
+  DETACHED_STROKE,
+  FX,
+  PAPER_DOT,
+  RING_ANNOUNCE_ALPHA,
+  RING_COLOR,
+  RING_SHADE_DEEPEN_BELOW_MILLI,
+  RING_SHADE_MAX,
+  RING_SHADE_MIN,
+  SILHOUETTE,
+  SPARK,
+  fxRandom,
+  tileSkin,
+  worldScale,
+} from '../lab/palette';
+import {
+  batchSilhouette,
+  batchTiles,
+  hitTest,
+  toPoints,
+  type ProjectedTile,
+} from '../lab/arenaGeometry';
+import type { QualitySettings } from '../lab/quality';
+import { arcPath, projectTile } from '../lab/useLab';
+import type { TileRef } from '../lab/battleTypes';
 
-export interface CollisionParticle {
-  id: number;
-  x: number;
-  y: number;
-  vx: number;
-  vy: number;
-  size: number;
-  rotation: number;
-  rotSpeed: number;
-  life: number;
-  maxLife: number;
-  opacity: number;
-  color: string;
-  type: 'triangle' | 'shard' | 'spark' | 'dust';
-}
+export type { TileRef };
 
 interface BattleArenaProps {
-  botA: BotData;
-  botB: BotData;
-  currentTimeSec: number;
+  view: ReplayView | null;
+  frame: FrameView | null;
+  tickFloat: number;
   isPlaying: boolean;
   damageMapActive: boolean;
   gridActive: boolean;
   vectorsActive: boolean;
-  onSelectTriangle: (triangle: TriangleCell | null) => void;
-  selectedTriangleId: string | null;
-  onTriggerImpact?: (intensity?: 'normal' | 'heavy') => void;
-  isImpactShaking?: boolean;
+  selected: TileRef | null;
+  onSelect: (ref: TileRef | null) => void;
+  quality: QualitySettings;
 }
 
+/**
+ * The arena.
+ *
+ * Everything drawn here comes from a `ReplayView`, which comes from a real replay
+ * produced by the engine. There are no hard-coded coordinates, no mock tiles, and
+ * no `Math.random()` - ky_thuat_my_thuat.md 1 requires that watching a replay
+ * twice looks identical, sparks included, and that nothing on the drawing path can
+ * ever influence the simulation.
+ *
+ * Draw calls are BATCHED (5.2 rule 1): tiles are merged into one path per
+ * (team, type, HP-band), so a 60-tile body and a 6-tile body cost the same. That
+ * is also why pointer handling is mathematical hit-testing rather than a handler
+ * per tile - a merged path has no per-tile identity to attach one to.
+ */
 export const BattleArena: React.FC<BattleArenaProps> = ({
-  botA,
-  botB,
-  currentTimeSec,
+  view,
+  frame,
+  tickFloat,
   isPlaying,
   damageMapActive,
   gridActive,
   vectorsActive,
-  onSelectTriangle,
-  selectedTriangleId,
-  onTriggerImpact,
-  isImpactShaking = false,
+  selected,
+  onSelect,
+  quality,
 }) => {
-  const containerRef = useRef<HTMLDivElement>(null);
-  const [hoveredTriangle, setHoveredTriangle] = useState<TriangleCell | null>(null);
-  const [tooltipPos, setTooltipPos] = useState<{ x: number; y: number }>({ x: 0, y: 0 });
-  const [fluidPhase, setFluidPhase] = useState<number>(0);
+  const [hover, setHover] = useState<TileRef | null>(null);
+  const svgRef = useRef<SVGSVGElement | null>(null);
+  /** latest projected tiles, so the pointer handler can hit-test without re-rendering */
+  const projectedRef = useRef<{ a: ProjectedTile[]; b: ProjectedTile[] }>({ a: [], b: [] });
+  /** rolling trail buffer, advanced once per simulated tick rather than per frame */
+  const trailRef = useRef<{ a: string[]; b: string[]; tick: number }>({ a: [], b: [], tick: -1 });
 
-  // Dynamic collision particles
-  const [particles, setParticles] = useState<CollisionParticle[]>([]);
-  const particlesRef = useRef<CollisionParticle[]>([]);
-  const nextParticleIdRef = useRef<number>(1);
-  const frameCountRef = useRef<number>(0);
-  const prevTimeSecRef = useRef<number>(currentTimeSec);
+  const scale = view ? worldScale(view.rs.ARENA_HALF) : 0.025;
+  const timeSec = view ? tickFloat / view.tickRate : 0;
+  const seed = view ? view.replay.manifest.seed : 0;
 
-  // Internal SVG stage micro-vibration for tactile impact feel
-  const [stageShake, setStageShake] = useState<{ x: number; y: number; rot: number }>({ x: 0, y: 0, rot: 0 });
-  const shakeTimerRef = useRef<number | null>(null);
+  const bots = useMemo(() => {
+    if (!view || !frame) return null;
 
-  // Color palettes for geometric breakaway shards
-  const warmShards = ['#ef4444', '#dc2626', '#ea580c', '#f59e0b', '#ffffff'];
-  const coolShards = ['#3b82f6', '#2563eb', '#06b6d4', '#10b981', '#ffffff'];
-  const dustShards = ['#94a3b8', '#cbd5e1', '#e2e8f0'];
-
-  /**
-   * Spawn a single geometric particle at target coordinate
-   */
-  const createParticle = useCallback(
-    (
-      originX: number,
-      originY: number,
-      isBurst = false,
-      biasAngle?: number,
-      customColor?: string
-    ): CollisionParticle => {
-      const id = nextParticleIdRef.current++;
-      const angle = biasAngle !== undefined
-        ? biasAngle + (Math.random() - 0.5) * 1.2
-        : Math.random() * Math.PI * 2;
-
-      const speed = isBurst
-        ? 1.8 + Math.random() * 4.2
-        : 0.5 + Math.random() * 1.6;
-
-      const vx = Math.cos(angle) * speed;
-      const vy = Math.sin(angle) * speed;
-
-      // Particle type: micro-triangles, sharp diamond shards, kinetic friction sparks, or micro dust
-      const rand = Math.random();
-      let type: CollisionParticle['type'] = 'triangle';
-      if (rand < 0.35) type = 'triangle';
-      else if (rand < 0.65) type = 'shard';
-      else if (rand < 0.85) type = 'spark';
-      else type = 'dust';
-
-      // Pick cohesive palette
-      let color = customColor;
-      if (!color) {
-        const pal = Math.random() > 0.5 ? warmShards : coolShards;
-        color = Math.random() > 0.15 ? pal[Math.floor(Math.random() * pal.length)] : dustShards[Math.floor(Math.random() * dustShards.length)];
+    const build = (bot: BotView) => {
+      const load = bot.effectiveLoadMilli / 1000;
+      // 3.7: the heavier the load, the slower and shallower the breathing.
+      const breathAmp = quality.breath ? FX.BREATH_AMPLITUDE * (load > 2 ? 2.2 : load > 1 ? 1.4 : 1) : 0;
+      const breathFreq = FX.BREATH_FREQ * (load > 2 ? 0.5 : load > 1 ? 0.75 : 1);
+      const hurt = 1 - bot.coreRatioMilli / 1000;
+      const wobble = quality.wobble
+        ? FX.WOBBLE_FREQ_HEALTHY + (FX.WOBBLE_FREQ_HURT - FX.WOBBLE_FREQ_HEALTHY) * hurt
+        : 0;
+      const breath = Math.sin(timeSec * breathFreq * Math.PI * 2) * breathAmp;
+      const squash = quality.squash ? squashAt(view, bot.team, frame.tick) : null;
+      const tiles: ProjectedTile[] = [];
+      for (const t of bot.tiles) {
+        if (!t.alive) continue;
+        tiles.push(projectTile(bot, t, scale, { timeSec, seed, wobble, breath, squash }) as ProjectedTile);
       }
+      return { bot, tiles };
+    };
+    return { a: build(frame.a), b: build(frame.b) };
+  }, [view, frame, scale, timeSec, seed, quality]);
 
-      const maxLife = isBurst ? 35 + Math.floor(Math.random() * 40) : 25 + Math.floor(Math.random() * 30);
+  if (bots) projectedRef.current = { a: bots.a.tiles, b: bots.b.tiles };
 
-      return {
-        id,
-        x: originX + (Math.random() - 0.5) * 6,
-        y: originY + (Math.random() - 0.5) * 6,
-        vx,
-        vy,
-        size: isBurst ? 2.5 + Math.random() * 3.5 : 1.8 + Math.random() * 2.5,
-        rotation: Math.random() * 360,
-        rotSpeed: (Math.random() - 0.5) * (isBurst ? 18 : 8),
-        life: 0,
-        maxLife,
-        opacity: 0.95,
-        color,
-        type,
-      };
-    },
-    []
+  const damage = useMemo(
+    () => (view && frame && damageMapActive ? view.damageMapAt(frame.tick) : null),
+    [view, frame, damageMapActive],
   );
 
-  /**
-   * Trigger a kinetic particle burst at collision shear points
-   */
-  const emitImpactBurst = useCallback(
-    (intensity: 'normal' | 'heavy' = 'normal') => {
-      const count = intensity === 'heavy' ? 24 : 16;
-      const newParticles: CollisionParticle[] = [];
+  /** Merged fill paths: at most 2 teams x 4 types x 5 bands, never one per tile. */
+  const shapes = useMemo(() => {
+    if (!bots) return [];
+    const empty: number[] = [];
+    return [
+      ...batchTiles(bots.a.tiles, 'A', damageMapActive, damage?.a ?? empty, damage?.peak ?? 0),
+      ...batchTiles(bots.b.tiles, 'B', damageMapActive, damage?.b ?? empty, damage?.peak ?? 0),
+    ];
+  }, [bots, damageMapActive, damage]);
 
-      // Primary collision point (512, 305)
-      for (let i = 0; i < count * 0.65; i++) {
-        const bias = Math.random() > 0.5 ? Math.PI : 0; // Splintering away from contact line
-        newParticles.push(createParticle(512, 305, true, bias));
-      }
-
-      // Detached scissor cell B-31 breakaway zone (503, 276)
-      for (let i = 0; i < count * 0.35; i++) {
-        newParticles.push(createParticle(503, 276, true, -Math.PI * 0.65, '#3b82f6'));
-      }
-
-      particlesRef.current = [...particlesRef.current.slice(-35), ...newParticles];
-
-      // Internal stage shake decay loop
-      if (shakeTimerRef.current) cancelAnimationFrame(shakeTimerRef.current);
-      let shakeFrame = 0;
-      const totalShakeFrames = intensity === 'heavy' ? 18 : 12;
-      const maxDist = intensity === 'heavy' ? 4.5 : 2.5;
-
-      const runStageShake = () => {
-        shakeFrame++;
-        if (shakeFrame <= totalShakeFrames) {
-          const decay = 1 - shakeFrame / totalShakeFrames;
-          setStageShake({
-            x: (Math.random() - 0.5) * maxDist * decay,
-            y: (Math.random() - 0.5) * maxDist * decay,
-            rot: (Math.random() - 0.5) * 0.25 * decay,
-          });
-          shakeTimerRef.current = requestAnimationFrame(runStageShake);
-        } else {
-          setStageShake({ x: 0, y: 0, rot: 0 });
-        }
-      };
-      shakeTimerRef.current = requestAnimationFrame(runStageShake);
-    },
-    [createParticle]
+  const silhouettes = useMemo(
+    () =>
+      bots
+        ? [
+            { team: 'A' as const, d: batchSilhouette(bots.a.tiles) },
+            { team: 'B' as const, d: batchSilhouette(bots.b.tiles) },
+          ]
+        : [],
+    [bots],
   );
 
-  // Trigger burst when parent indicates impact shake
-  useEffect(() => {
-    if (isImpactShaking) {
-      emitImpactBurst('heavy');
-    }
-  }, [isImpactShaking, emitImpactBurst]);
-
-  // Check timeline progression for damage registration
-  useEffect(() => {
-    const prevSec = Math.floor(prevTimeSecRef.current);
-    const currSec = Math.floor(currentTimeSec);
-    prevTimeSecRef.current = currentTimeSec;
-
-    // If scrubbed or ticked over critical damage seconds (38, 41, 42, 44, 45, 46)
-    if (prevSec !== currSec) {
-      const damageSeconds = [38, 41, 42, 44, 45, 46];
-      if (damageSeconds.includes(currSec)) {
-        const isCritical = [41, 44, 45, 46].includes(currSec);
-        emitImpactBurst(isCritical ? 'heavy' : 'normal');
-        onTriggerImpact?.(isCritical ? 'heavy' : 'normal');
-      }
-    }
-  }, [currentTimeSec, emitImpactBurst, onTriggerImpact]);
-
-  // Main animation frame loop: living fluid oscillation & particle physics
-  useEffect(() => {
-    let animFrame: number;
-    const updateLoop = () => {
-      frameCountRef.current++;
-      setFluidPhase((prev) => (prev + (isPlaying ? 0.035 : 0.012)) % (Math.PI * 2));
-
-      // Continuous subtle particle emission from collision points
-      if (frameCountRef.current % 5 === 0) {
-        // Subtle micro-fragment from collision point
-        const p1 = createParticle(512, 305, false);
-        particlesRef.current.push(p1);
-
-        // Subtle fading particle from detached cell B-31 breakaway zone
-        if (Math.random() > 0.4) {
-          const p2 = createParticle(503, 276, false, -Math.PI * 0.75, '#60a5fa');
-          particlesRef.current.push(p2);
-        }
-      }
-
-      // Physics update for active particles
-      const updated: CollisionParticle[] = [];
-      for (const p of particlesRef.current) {
-        p.life += 1;
-        if (p.life < p.maxLife) {
-          p.x += p.vx;
-          p.y += p.vy;
-          p.vx *= 0.96; // 2D arena medium drag
-          p.vy *= 0.96;
-          p.rotation += p.rotSpeed;
-          p.opacity = Math.max(0, 1 - p.life / p.maxLife);
-          updated.push(p);
-        }
-      }
-
-      // Cap max particles to prevent any DOM buildup
-      particlesRef.current = updated.slice(-65);
-      setParticles([...particlesRef.current]);
-
-      animFrame = requestAnimationFrame(updateLoop);
+  // ---- 3.6 trail ----------------------------------------------------------
+  // A rolling buffer of silhouette paths, advanced once per simulated tick. The
+  // doc forbids redrawing the body N times per frame; because the silhouette is
+  // already one merged path, keeping three ghosts costs three elements and three
+  // re-projections per tick, not per frame.
+  if (view && bots && frame && quality.trail && trailRef.current.tick !== frame.tick) {
+    const ghosts = quality.trailGhosts;
+    const push = (prev: string[], d: string): string[] =>
+      d ? [...prev, d].slice(-ghosts) : prev;
+    const fastA = isMovingFast(view, 'A', frame.tick);
+    const fastB = isMovingFast(view, 'B', frame.tick);
+    trailRef.current = {
+      tick: frame.tick,
+      a: fastA ? push(trailRef.current.a, silhouettes[0]?.d ?? '') : [],
+      b: fastB ? push(trailRef.current.b, silhouettes[1]?.d ?? '') : [],
     };
+  }
+  if (!quality.trail && trailRef.current.tick !== -1) {
+    trailRef.current = { a: [], b: [], tick: -1 };
+  }
 
-    animFrame = requestAnimationFrame(updateLoop);
-    return () => {
-      cancelAnimationFrame(animFrame);
-      if (shakeTimerRef.current) cancelAnimationFrame(shakeTimerRef.current);
-    };
-  }, [isPlaying, createParticle]);
-
-  // Compute stress-based color for Damage Map mode
-  const getStressColor = (stress: number) => {
-    if (stress < 25) return '#3b82f6'; // Low: cool blue
-    if (stress < 50) return '#10b981'; // Medium-low: emerald
-    if (stress < 75) return '#f59e0b'; // Medium-high: amber
-    return '#ef4444'; // High/Critical: crimson
-  };
-
-  /**
-   * Fallback helper to compute triangular vertices
-   */
-  const computeTrianglePoints = (
-    cx: number,
-    cy: number,
-    size: number,
-    rotationDeg: number
-  ) => {
-    const angle = (rotationDeg * Math.PI) / 180;
-    const r = size * 0.57735; // Circumradius R = S / sqrt(3)
-    const p1x = cx + r * Math.cos(angle);
-    const p1y = cy + r * Math.sin(angle);
-    const p2x = cx + r * Math.cos(angle + (2 * Math.PI) / 3);
-    const p2y = cy + r * Math.sin(angle + (2 * Math.PI) / 3);
-    const p3x = cx + r * Math.cos(angle + (4 * Math.PI) / 3);
-    const p3y = cy + r * Math.sin(angle + (4 * Math.PI) / 3);
-
-    return `${p1x.toFixed(2)},${p1y.toFixed(2)} ${p2x.toFixed(2)},${p2y.toFixed(2)} ${p3x.toFixed(2)},${p3y.toFixed(2)}`;
-  };
-
-  /**
-   * Evaluates vertex coordinates with continuous field displacement.
-   * Adjacent triangles sharing vertices deform together, guaranteeing airtight edge cohesion!
-   */
-  const getTrianglePointsString = (cell: TriangleCell, bot: BotData) => {
-    if (!cell.vertices) {
-      return computeTrianglePoints(cell.x, cell.y, cell.size, cell.rotation);
+  /** Sparks for hits in the last ~0.45 s, all derived from the match seed. */
+  const sparks = useMemo(() => {
+    if (!view || !frame || quality.maxParticles === 0) return [];
+    const out: Array<{ id: string; x: number; y: number; dx: number; dy: number; r: number; alpha: number; color: string }> = [];
+    for (const e of view.eventsInRange(frame.tick - 14, frame.tick)) {
+      if (e.kind !== 'hit') continue;
+      const life = 1 - (frame.tick - e.tick) / 14;
+      if (life <= 0) continue;
+      const count = e.advantage === 'adv' ? 8 : e.advantage === 'neutral' ? 3 : 2;
+      // 3.4: a dead-on hit throws a tight beam, a glancing one sprays wide.
+      const spread = 0.6 + (1 - e.orientMul / 1000) * 4;
+      const baseAngle = Math.atan2(e.normal.y, e.normal.x);
+      for (let k = 0; k < count; k++) {
+        const r1 = fxRandom(seed, e.tick, k, 1);
+        const r2 = fxRandom(seed, e.tick, k, 2);
+        const r3 = fxRandom(seed, e.tick, k, 3);
+        const ang = baseAngle + (r1 - 0.5) * spread;
+        const speed = 18 + r2 * 60;
+        out.push({
+          id: `${e.tick}-${e.defender}-${k}`,
+          x: 500 + e.at.x * scale,
+          y: 500 + e.at.y * scale,
+          dx: Math.cos(ang) * speed * life,
+          dy: Math.sin(ang) * speed * life,
+          r: 1.1 + r3 * 1.6,
+          alpha: life,
+          color: e.advantage === 'adv' ? SPARK.adv : e.advantage === 'neutral' ? SPARK.neutral : SPARK.disadv,
+        });
+      }
     }
-
-    if (cell.status === 'detached' && cell.detachedVelocity) {
-      const vx = cell.detachedVelocity.vx;
-      const vy = cell.detachedVelocity.vy;
-      const rotRad = (cell.detachedVelocity.rotV * Math.PI) / 180;
-      const cos = Math.cos(rotRad);
-      const sin = Math.sin(rotRad);
-      const cx = cell.x;
-      const cy = cell.y;
-
-      return cell.vertices
-        .map((v) => {
-          const dx = v.x - cx;
-          const dy = v.y - cy;
-          const rx = dx * cos - dy * sin + cx + vx;
-          const ry = dx * sin + dy * cos + cy + vy;
-          return `${rx.toFixed(2)},${ry.toFixed(2)}`;
-        })
-        .join(' ');
-    }
-
-    // Continuous smooth space displacement field (ensures shared edges remain 100% coincident)
-    return cell.vertices
-      .map((v) => {
-        // Organic living geometry wave
-        const waveX = Math.sin(fluidPhase + v.x * 0.025 + v.y * 0.02) * 1.0;
-        const waveY = Math.cos(fluidPhase * 0.85 + v.x * 0.02 + v.y * 0.025) * 0.9;
-
-        // Subtle elastic compression at collision interface
-        let compX = 0;
-        let compY = 0;
-        if (bot.id === 'B' && v.x < 10 && v.x > -50 && Math.abs(v.y) < 40) {
-          compX = -2.5 + Math.sin(fluidPhase * 2) * 0.6;
-        }
-        if (bot.id === 'A' && v.x > 80) {
-          compX = 1.5 + Math.sin(fluidPhase * 2.5) * 0.5;
-        }
-
-        const fx = v.x + waveX + compX;
-        const fy = v.y + waveY + compY;
-        return `${fx.toFixed(2)},${fy.toFixed(2)}`;
-      })
-      .join(' ');
-  };
+    // 5.2 rule 5: over the cap, retire the OLDEST spark, never the newest - the
+    // newest is the one the eye is on.
+    return out.length > quality.maxParticles ? out.slice(-quality.maxParticles) : out;
+  }, [view, frame, seed, scale, quality.maxParticles]);
 
   /**
-   * Render individual triangular module with strict adherence to visual hierarchy:
-   * - Hammer: solid fill, strong thick outline
-   * - Scissor: cleaner thin outline
-   * - Paper: subtle dotted texture
-   * - Motor: very pale fill with dashed outline
-   * - Core: circular glowing marker surrounding combat triangle
+   * 4.8 - a detached cluster is frozen at its world position at the instant it
+   * broke and drifts outward. It must NOT keep following the body, otherwise the
+   * viewer reads it as still attached.
    */
-  const renderTriangle = (cell: TriangleCell, bot: BotData) => {
-    const isSelected = selectedTriangleId === cell.id;
-    const isHovered = hoveredTriangle?.id === cell.id;
+  const ghosts = useMemo(() => {
+    if (!view || !frame) return [];
+    const fadeTicks = Math.max(1, Math.round(FX.DETACH_FADE_SEC * view.tickRate));
+    const out: Array<{ key: string; points: string; alpha: number }> = [];
+    for (const e of view.eventsInRange(frame.tick - fadeTicks, frame.tick)) {
+      if (e.kind !== 'detach') continue;
+      const age = frame.tick - e.tick;
+      const alpha = Math.max(0, 1 - age / fadeTicks);
+      if (alpha <= 0) continue;
+      const bot = e.team === 'A' ? frame.a : frame.b;
+      const pose = view.poseAt(e.team, e.tick);
+      const drift = Math.trunc((FX.DETACH_DRIFT_MILLI_PER_SEC * age) / view.tickRate);
+      for (const i of e.tris) {
+        const g = bot.geometry.tris[i];
+        if (!g) continue;
+        const pts: string[] = [];
+        for (const v of g.localVerts) {
+          const r = rotateOffset(v.x, v.y, pose.heading);
+          let wx = pose.x + r.x;
+          let wy = pose.y + r.y;
+          const len = Math.hypot(wx - pose.x, wy - pose.y) || 1;
+          wx += ((wx - pose.x) / len) * drift;
+          wy += ((wy - pose.y) / len) * drift;
+          pts.push(`${(500 + wx * scale).toFixed(1)},${(500 + wy * scale).toFixed(1)}`);
+        }
+        out.push({ key: `${e.tick}-${i}`, points: pts.join(' '), alpha });
+      }
+    }
+    return out;
+  }, [view, frame, scale]);
 
-    const points = getTrianglePointsString(cell, bot);
+  if (!view || !frame || !bots) {
+    return (
+      <div className="relative w-full h-full bg-white flex items-center justify-center">
+        <p className="text-sm text-neutral-400 font-mono">chưa có trận nào — bấm “Chạy trận”</p>
+      </div>
+    );
+  }
 
-    // Styling configuration per module type
-    const isWarm = bot.identity === 'warm';
-    let fill = '#ffffff';
-    let stroke = isWarm ? '#dc2626' : '#2563eb';
-    let strokeWidth = 1.2;
-    let strokeDasharray = undefined;
+  const ringSvgR = frame.ringRadiusMilli * scale;
+  const shade = frame.ringRadiusMilli < RING_SHADE_DEEPEN_BELOW_MILLI ? RING_SHADE_MAX : RING_SHADE_MIN;
+  const announceAlpha = frame.ringAnnouncing
+    ? RING_ANNOUNCE_ALPHA * (1 - (view.rs.RING_START_TICK - frame.tick) / view.rs.RING_ANNOUNCE_TICKS)
+    : frame.ringActive
+      ? RING_ANNOUNCE_ALPHA
+      : 0;
 
-    if (damageMapActive) {
-      fill = getStressColor(cell.stress);
-      stroke = '#ffffff';
-      strokeWidth = 1.5;
-    } else {
-      switch (cell.type) {
-        case 'hammer':
-          fill = isWarm ? '#dc2626' : '#2563eb';
-          stroke = isWarm ? '#991b1b' : '#1d4ed8';
-          strokeWidth = 2.0;
-          break;
+  const lookup = (ref: TileRef | null) => {
+    if (!ref) return null;
+    const bot = ref.team === 'A' ? frame.a : frame.b;
+    const tile = bot.tiles[ref.index];
+    return tile ? { ref, tile, bot } : null;
+  };
+  const hoverInfo = lookup(hover);
+  const selectedInfo = lookup(selected);
 
-        case 'scissor':
-          fill = '#ffffff';
-          stroke = isWarm ? '#ea580c' : '#0d9488';
-          strokeWidth = 1.2;
-          break;
+  /** Client coordinates -> arena coordinates, via the SVG's own transform. */
+  const toArena = (clientX: number, clientY: number): [number, number] | null => {
+    const svg = svgRef.current;
+    if (!svg) return null;
+    const ctm = svg.getScreenCTM();
+    if (!ctm) return null;
+    const p = new DOMPoint(clientX, clientY).matrixTransform(ctm.inverse());
+    return [p.x, p.y];
+  };
 
-        case 'paper':
-          fill = isWarm ? 'url(#paper-pattern-warm)' : 'url(#paper-pattern-cool)';
-          stroke = isWarm ? '#d97706' : '#0284c7';
-          strokeWidth = 1.2;
-          break;
+  const handlePointer = (clientX: number, clientY: number) => {
+    const pt = toArena(clientX, clientY);
+    if (!pt) return null;
+    const [x, y] = pt;
+    // Team A is drawn on top of team B, so it wins a tie.
+    const a = hitTest(projectedRef.current.a, x, y);
+    if (a !== null) return { team: 'A' as const, index: a };
+    const b = hitTest(projectedRef.current.b, x, y);
+    if (b !== null) return { team: 'B' as const, index: b };
+    return null;
+  };
 
-        case 'motor':
-          fill = isWarm ? '#fef3c7' : '#e0f2fe';
-          stroke = isWarm ? '#f59e0b' : '#38bdf8';
-          strokeWidth = 1.2;
-          strokeDasharray = '2.5 1.5';
-          break;
+  const renderCore = (bot: BotView, tiles: ProjectedTile[]) => {
+    const t = tiles.find((x) => x.isCore);
+    if (!t) return null;
+    const r = 11;
+    const frac = Math.max(0, Math.min(1, t.hpRatioMilli / 1000));
+    const weak = frac < 0.3;
+    const outside = bot.ringOutside;
+    const color = tileSkin(bot.team, 'hammer').fill;
+    const pulseDur = weak ? 0.6 : 1.6;
+    const badge = CORE_BADGE[bot.team];
+
+    // 4.3 channel 3: the badge is what survives greyscale. A solid ring for A,
+    // the same ring with four arcs cut out for B.
+    const notches: React.ReactNode[] = [];
+    if (!badge.solid) {
+      for (let i = 0; i < badge.notches; i++) {
+        const a0 = (i * Math.PI) / 2 + 0.18;
+        const a1 = a0 + 0.42;
+        notches.push(
+          <line
+            key={i}
+            x1={t.cx + r * Math.cos(a0)}
+            y1={t.cy + r * Math.sin(a0)}
+            x2={t.cx + r * Math.cos(a1)}
+            y2={t.cy + r * Math.sin(a1)}
+            stroke={ARENA.CORE_CENTER}
+            strokeWidth="3"
+          />,
+        );
       }
     }
 
-    // Handle detached fading cell
-    let finalOpacity = cell.opacity ?? 1;
-    if (cell.id === 'B-D3-FADE') {
-      fill = '#f1f5f9';
-      stroke = '#cbd5e1';
-      strokeWidth = 1;
-      strokeDasharray = '1 2';
+    // 4.7: a Core outside the ring gets a red flash AND a thin guide line to the
+    // nearest point on the circle. The line is the part that matters - it turns
+    // "you are losing HP" into "you are losing HP, go this way".
+    let guide: React.ReactNode = null;
+    if (outside) {
+      const dx = t.cx - 500;
+      const dy = t.cy - 500;
+      const len = Math.hypot(dx, dy) || 1;
+      guide = (
+        <line
+          x1={t.cx + (dx / len) * (r + 2)}
+          y1={t.cy + (dy / len) * (r + 2)}
+          x2={500 + (dx / len) * ringSvgR}
+          y2={500 + (dy / len) * ringSvgR}
+          stroke={ARENA.CORE_ALERT}
+          strokeWidth="1.2"
+          strokeDasharray="3 3"
+          opacity="0.8"
+        />
+      );
     }
-
-    // Calculate core position with wave offset
-    const waveX = Math.sin(fluidPhase + cell.x * 0.025 + cell.y * 0.02) * 1.0;
-    const waveY = Math.cos(fluidPhase * 0.85 + cell.x * 0.02 + cell.y * 0.025) * 0.9;
-    const coreX = cell.x + waveX;
-    const coreY = cell.y + waveY;
 
     return (
-      <g
-        key={cell.id}
-        className="cursor-pointer transition-transform duration-150 group/triangle"
-        onClick={(e) => {
-          e.stopPropagation();
-          onSelectTriangle(cell);
-          // If clicking damaged or detached cell, trigger micro-kinetic shock
-          if (cell.status === 'damaged' || cell.status === 'detached') {
-            emitImpactBurst('normal');
-            onTriggerImpact?.('normal');
-          }
-        }}
-        onMouseEnter={(e) => {
-          setHoveredTriangle(cell);
-          const rect = containerRef.current?.getBoundingClientRect();
-          if (rect) {
-            setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-          }
-        }}
-        onMouseMove={(e) => {
-          const rect = containerRef.current?.getBoundingClientRect();
-          if (rect) {
-            setTooltipPos({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-          }
-        }}
-        onMouseLeave={() => setHoveredTriangle(null)}
-      >
-        {/* Core Marker: circular glowing ring surrounding combat triangle */}
-        {cell.isCore && (
-          <g>
-            <circle
-              cx={coreX}
-              cy={coreY}
-              r={cell.size * 1.3}
-              fill="none"
-              stroke={isWarm ? '#ea580c' : '#2563eb'}
-              strokeWidth="2"
-              strokeDasharray="4 2"
-              opacity="0.8"
-              className="animate-spin"
-              style={{ animationDuration: '8s', transformOrigin: `${coreX}px ${coreY}px` }}
-            />
-            <circle
-              cx={coreX}
-              cy={coreY}
-              r={cell.size * 0.9}
-              fill={isWarm ? 'rgba(234, 88, 12, 0.18)' : 'rgba(37, 99, 235, 0.18)'}
-              stroke={isWarm ? '#dc2626' : '#1d4ed8'}
-              strokeWidth="1.5"
-            />
-            <circle
-              cx={coreX}
-              cy={coreY}
-              r="3.5"
-              fill="#ffffff"
-              stroke={isWarm ? '#ea580c' : '#2563eb'}
-              strokeWidth="1.2"
-              className="animate-ping"
-              style={{ animationDuration: '2.5s' }}
-            />
-          </g>
+      <g key={`core-${bot.team}`} className="pointer-events-none">
+        {guide}
+        <circle cx={t.cx} cy={t.cy} r={r} fill="none" stroke={ARENA.CORE_RING_BG} strokeWidth="2.5" opacity="0.9" />
+        {frac > 0 && (
+          <path d={arcPath(t.cx, t.cy, r, 0, frac)} fill="none" stroke={color} strokeWidth="2.5" strokeLinecap="round" />
         )}
-
-        {/* Selected or Hovered halo highlight */}
-        {(isSelected || isHovered) && (
-          <polygon
-            points={points}
-            fill="none"
-            stroke="#0f172a"
-            strokeWidth="3.2"
-            strokeLinejoin="round"
-            opacity="0.9"
-          />
-        )}
-
-        {/* The Triangle Cell Shape */}
-        <polygon
-          points={points}
-          fill={fill}
-          stroke={isSelected ? '#0f172a' : stroke}
-          strokeWidth={isSelected ? 2.5 : strokeWidth}
-          strokeDasharray={strokeDasharray}
-          strokeLinejoin="round"
-          opacity={finalOpacity}
-          className="transition-colors duration-200"
+        {notches}
+        <circle
+          cx={t.cx}
+          cy={t.cy}
+          r={r * 0.55}
+          fill={weak ? ARENA.CORE_WEAK_CENTER : ARENA.CORE_CENTER}
+          stroke={color}
+          strokeWidth="1.4"
+          style={{ animation: `pc-pulse ${pulseDur}s ease-in-out infinite` }}
         />
-
-        {/* Motor thruster thrust chevron */}
-        {cell.type === 'motor' && cell.status !== 'detached' && !damageMapActive && (
-          <path
-            d={`M ${coreX - 4} ${coreY} L ${coreX} ${coreY - 3} L ${coreX + 4} ${coreY}`}
+        {outside && (
+          <circle
+            cx={t.cx}
+            cy={t.cy}
+            r={r + 3}
             fill="none"
-            stroke={isWarm ? '#ea580c' : '#0d9488'}
-            strokeWidth="1"
-            opacity="0.75"
+            stroke={ARENA.CORE_ALERT}
+            strokeWidth="1.6"
+            style={{ animation: 'pc-pulse 0.5s steps(2, end) infinite' }}
           />
         )}
-
-        {/* Scissor cutting bevel accent line */}
-        {cell.type === 'scissor' && !damageMapActive && (
-          <line
-            x1={coreX - 3}
-            y1={coreY - 3}
-            x2={coreX + 3}
-            y2={coreY + 3}
-            stroke={isWarm ? '#ea580c' : '#0d9488'}
-            strokeWidth="0.9"
-            opacity="0.6"
-          />
-        )}
-
-        {/* Damaged cell fracture line */}
-        {cell.status === 'damaged' && (
-          <line
-            x1={coreX - 5}
-            y1={coreY - 2}
-            x2={coreX + 5}
-            y2={coreY + 3}
-            stroke="#ef4444"
-            strokeWidth="1.2"
-          />
+        {weak && !outside && (
+          <circle cx={t.cx} cy={t.cy} r={r + 3} fill="none" stroke={ARENA.CORE_ALERT} strokeWidth="1" opacity="0.5" />
         )}
       </g>
     );
   };
 
   return (
-    <div
-      ref={containerRef}
-      className="relative w-full h-full bg-white overflow-hidden select-none flex items-center justify-center cursor-crosshair"
-      onClick={() => onSelectTriangle(null)}
-    >
-      {/* 2D Flat Sandbox Arena SVG Viewport with Tactile Stage Displacement */}
+    <div className="relative w-full h-full bg-white overflow-hidden select-none flex items-center justify-center">
       <svg
-        viewBox="0 0 1000 620"
+        ref={svgRef}
+        viewBox={`0 0 ${ARENA_VIEWBOX} ${ARENA_VIEWBOX}`}
         preserveAspectRatio="xMidYMid meet"
-        className="w-full h-full transition-transform duration-75"
-        style={{
-          transform: `translate(${stageShake.x.toFixed(2)}px, ${stageShake.y.toFixed(2)}px) rotate(${stageShake.rot.toFixed(3)}deg)`,
+        className="w-full h-full"
+        onClick={() => onSelect(null)}
+        onMouseMove={(e) => {
+          const hit = handlePointer(e.clientX, e.clientY);
+          setHover((prev) =>
+            prev && hit && prev.team === hit.team && prev.index === hit.index ? prev : hit,
+          );
         }}
+        onMouseLeave={() => setHover(null)}
       >
         <defs>
-          {/* Paper Triangle subtle dotted pattern (Warm) */}
-          <pattern id="paper-pattern-warm" width="6" height="6" patternUnits="userSpaceOnUse">
-            <rect width="6" height="6" fill="#fffbeb" />
-            <circle cx="3" cy="3" r="0.85" fill="#d97706" opacity="0.65" />
+          <pattern id="paper-dots-a" width="7" height="7" patternUnits="userSpaceOnUse">
+            <rect width="7" height="7" fill={tileSkin("A", "paper").fill} />
+            <circle cx="3.5" cy="3.5" r="1" fill={PAPER_DOT.A} opacity="0.7" />
           </pattern>
-
-          {/* Paper Triangle subtle dotted pattern (Cool) */}
-          <pattern id="paper-pattern-cool" width="6" height="6" patternUnits="userSpaceOnUse">
-            <rect width="6" height="6" fill="#f0fdf4" />
-            <circle cx="3" cy="3" r="0.85" fill="#0d9488" opacity="0.65" />
+          <pattern id="paper-dots-b" width="7" height="7" patternUnits="userSpaceOnUse">
+            <rect width="7" height="7" fill={tileSkin("B", "paper").fill} />
+            <circle cx="3.5" cy="3.5" r="1" fill={PAPER_DOT.B} opacity="0.7" />
           </pattern>
-
-          {/* Ultra-fine low-contrast Equilateral Triangular Grid Pattern (Side=26, W=22.52) */}
-          <pattern id="arena-tri-grid" width="45.033" height="26" patternUnits="userSpaceOnUse">
+          <pattern id="arena-tri-grid" width="25" height="43.301" patternUnits="userSpaceOnUse">
             <path
-              d="M 0 0 L 0 26 M 22.517 0 L 22.517 26 M 0 0 L 45.033 26 M 0 13 L 22.517 26 M 22.517 0 L 45.033 13 M 0 26 L 45.033 0 M 0 13 L 22.517 0 M 22.517 26 L 45.033 13"
+              d="M 0 0 L 0 43.301 M 0 0 L 25 21.65 M 25 21.65 L 0 43.301 M 25 0 L 25 43.301 M 25 0 L 50 21.65 M 50 21.65 L 25 43.301"
               fill="none"
-              stroke="#94a3b8"
+              stroke={ARENA.GRID}
               strokeWidth="0.4"
-              strokeOpacity="0.2"
+              strokeOpacity="0.28"
             />
           </pattern>
-
-          {/* Subtle Radial vignette to keep arena pure white in center */}
-          <radialGradient id="arena-lighting" cx="50%" cy="50%" r="50%">
-            <stop offset="0%" stopColor="#ffffff" />
-            <stop offset="85%" stopColor="#ffffff" />
-            <stop offset="100%" stopColor="#f8fafc" />
-          </radialGradient>
         </defs>
 
-        {/* Arena Pure White Background with Faint Vignette */}
-        <rect width="1000" height="620" fill="url(#arena-lighting)" />
+        <rect width={ARENA_VIEWBOX} height={ARENA_VIEWBOX} fill={ARENA.BG} />
+        {gridActive && <rect width={ARENA_VIEWBOX} height={ARENA_VIEWBOX} fill="url(#arena-tri-grid)" />}
 
-        {/* Subtle, fine-grain low-contrast triangular grid */}
-        {gridActive && (
-          <rect width="1000" height="620" fill="url(#arena-tri-grid)" opacity="0.85" />
+        <rect
+          x={500 - view.rs.ARENA_HALF * 1000 * scale}
+          y={500 - view.rs.ARENA_HALF * 1000 * scale}
+          width={view.rs.ARENA_HALF * 2000 * scale}
+          height={view.rs.ARENA_HALF * 2000 * scale}
+          fill="none"
+          stroke={ARENA.EDGE}
+          strokeWidth="1"
+          strokeDasharray="5 6"
+          opacity="0.5"
+        />
+
+        {/* 4.7: the ring fades in over 1.5 s and never pops into existence. */}
+        {announceAlpha > 0 && (
+          <circle
+            cx={500}
+            cy={500}
+            r={ringSvgR}
+            fill="none"
+            stroke={RING_COLOR}
+            strokeWidth="1.5"
+            strokeDasharray="6 5"
+            opacity={announceAlpha}
+          />
+        )}
+        {frame.ringActive && (
+          <>
+            <path
+              d={`M 0 0 H ${ARENA_VIEWBOX} V ${ARENA_VIEWBOX} H 0 Z M ${500 + ringSvgR} 500 A ${ringSvgR} ${ringSvgR} 0 1 0 ${500 - ringSvgR} 500 A ${ringSvgR} ${ringSvgR} 0 1 0 ${500 + ringSvgR} 500`}
+              fill={ARENA.RING_SHADE}
+              opacity={shade}
+              fillRule="evenodd"
+            />
+            <circle
+              cx={500}
+              cy={500}
+              r={ringSvgR}
+              fill="none"
+              stroke={RING_COLOR}
+              strokeWidth="1.5"
+              strokeDasharray="6 5"
+            />
+          </>
         )}
 
-        {/* Arena Boundary & Coordinates - Crisp minimal scientific aesthetic */}
-        <g opacity="0.22">
-          <rect
-            x="40"
-            y="30"
-            width="920"
-            height="560"
-            fill="none"
-            stroke="#cbd5e1"
-            strokeWidth="0.8"
-            strokeDasharray="4 6"
-          />
-          {/* Subtle Coordinate Axis center marks */}
-          <line x1="500" y1="30" x2="500" y2="45" stroke="#94a3b8" strokeWidth="1" />
-          <line x1="500" y1="575" x2="500" y2="590" stroke="#94a3b8" strokeWidth="1" />
-          <line x1="40" y1="305" x2="55" y2="305" stroke="#94a3b8" strokeWidth="1" />
-          <line x1="945" y1="305" x2="960" y2="305" stroke="#94a3b8" strokeWidth="1" />
-          {/* Center Origin Crosshair */}
-          <circle cx="512" cy="305" r="12" fill="none" stroke="#e2e8f0" strokeWidth="1" strokeDasharray="2 2" />
-          <line x1="504" y1="305" x2="520" y2="305" stroke="#cbd5e1" strokeWidth="1" />
-          <line x1="512" y1="297" x2="512" y2="313" stroke="#cbd5e1" strokeWidth="1" />
-        </g>
-
-        {/* KINETIC VECTOR OVERLAY (Optional toggleable) */}
-        {vectorsActive && (
-          <g opacity="0.6">
-            {/* Bot A forward spear thrust vector */}
-            <line x1="380" y1="305" x2="512" y2="305" stroke="#ea580c" strokeWidth="1.5" strokeDasharray="3 2" />
-            <polygon points="515,305 505,301 505,309" fill="#ea580c" />
-            {/* Bot B rotational wrap vector */}
-            <path
-              d="M 640 220 C 580 230, 540 280, 530 330"
-              fill="none"
-              stroke="#2563eb"
-              strokeWidth="1.5"
-              strokeDasharray="3 2"
-            />
-            <polygon points="530,335 536,325 526,327" fill="#2563eb" />
+        {/* 3.6 trail, oldest ghost faintest. Six paths at most, for both bots. */}
+        {quality.trail && (
+          <g opacity="0.28">
+            {([...trailRef.current.a, ...trailRef.current.b] as string[]).map((d, i) => (
+              <path key={`trail-${i}`} d={d} fill={SILHOUETTE} opacity={0.18 + (i % 3) * 0.06} />
+            ))}
           </g>
         )}
 
-        {/* ========================================================================= */}
-        {/* COLLISION REGION EFFECTS (Restrained, subtle, geometric & interactive) */}
-        {/* ========================================================================= */}
-        <g
-          id="collision-zone"
-          transform="translate(512, 305)"
-          className="cursor-pointer group/collision"
-          onClick={(e) => {
-            e.stopPropagation();
-            emitImpactBurst('heavy');
-            onTriggerImpact?.('heavy');
-          }}
-        >
-          {/* Active Impact Shockwave Rings */}
-          <circle
-            cx="0"
-            cy="0"
-            r={isImpactShaking ? "34" : "28"}
-            fill="none"
-            stroke="rgba(234, 88, 12, 0.35)"
-            strokeWidth={isImpactShaking ? "2" : "1.2"}
-            strokeDasharray="3 3"
-            className="animate-ping"
-            style={{ animationDuration: isImpactShaking ? '1.2s' : '3s' }}
-          />
-          <circle
-            cx="0"
-            cy="0"
-            r={isImpactShaking ? "20" : "16"}
-            fill="none"
-            stroke="rgba(37, 99, 235, 0.45)"
-            strokeWidth="1.2"
-          />
-
-          {/* Restrained geometric collision spark lines */}
-          <line x1="-8" y1="-12" x2="-14" y2="-22" stroke="#dc2626" strokeWidth="1.5" />
-          <line x1="4" y1="-14" x2="8" y2="-25" stroke="#f59e0b" strokeWidth="1.2" />
-          <line x1="12" y1="-4" x2="22" y2="-7" stroke="#3b82f6" strokeWidth="1.2" />
-          <line x1="6" y1="8" x2="16" y2="18" stroke="#10b981" strokeWidth="1.2" />
-          <line x1="-6" y1="10" x2="-12" y2="18" stroke="#ea580c" strokeWidth="1.2" />
-
-          {/* Micro contact core spark */}
-          <polygon points="-2,-1 2,-1 0,-4" fill="#ea580c" opacity="0.8" />
-          <polygon points="4,2 6,6 2,5" fill="#2563eb" opacity="0.8" />
-          <polygon points="-5,3 -2,7 -7,6" fill="#f59e0b" opacity="0.8" />
-          <circle cx="0" cy="0" r="2.5" fill="#ffffff" stroke="#ef4444" strokeWidth="1.2" />
-        </g>
-
-        {/* ========================================================================= */}
-        {/* BOT A — LIVING GEOMETRIC ORGANISM (SPEAR v12) - WARM IDENTITY */}
-        {/* ========================================================================= */}
-        <g
-          id="bot-a-container"
-          transform={`translate(${botA.position.x}, ${botA.position.y}) rotate(${botA.position.rotation})`}
-        >
-          {/* Subtle fluid boundary envelope: organic living organism feel */}
+        {/* 4.4 silhouette: one merged path per team, then the batched fills. */}
+        {silhouettes.map((s) => (
           <path
-            d="M 115 0 C 95 -45, 30 -75, -45 -70 C -105 -65, -115 -25, -115 0 C -115 25, -105 65, -45 70 C 30 75, 95 45, 115 0 Z"
-            fill="none"
-            stroke="rgba(234, 88, 12, 0.1)"
+            key={`sil-${s.team}`}
+            d={s.d}
+            fill={SILHOUETTE}
+            stroke={SILHOUETTE}
             strokeWidth="1.5"
-            strokeDasharray="2 3"
+            strokeLinejoin="round"
           />
+        ))}
 
-          {/* Render individual triangular modules (connected edge-to-edge) */}
-          {botA.modules.map((cell) => renderTriangle(cell, botA))}
-        </g>
+        {shapes.map((s) => {
+          const skin = tileSkin(s.team, s.type);
+          return (
+            <path
+              key={s.key}
+              d={s.d}
+              fill={s.fill}
+              stroke={skin.stroke}
+              strokeWidth={skin.strokeWidth}
+              strokeDasharray={skin.dash}
+              strokeLinejoin="round"
+            />
+          );
+        })}
 
-        {/* ========================================================================= */}
-        {/* BOT B — LIVING GEOMETRIC ORGANISM (FLANKER v08) - COOL IDENTITY */}
-        {/* ========================================================================= */}
-        <g
-          id="bot-b-container"
-          transform={`translate(${botB.position.x}, ${botB.position.y}) rotate(${botB.position.rotation})`}
-        >
-          {/* Subtle fluid boundary envelope: organic crescent shape-shifting feel */}
-          <path
-            d="M 60 -155 C 20 -115, -25 -60, -48 -10 C -52 0, -52 10, -48 20 C -25 70, 20 125, 60 165 C 35 110, 15 50, 15 0 C 15 -50, 35 -110, 60 -155 Z"
-            fill="none"
-            stroke="rgba(37, 99, 235, 0.1)"
-            strokeWidth="1.5"
-            strokeDasharray="2 3"
-          />
-
-          {/* Render individual triangular modules (includes sheared cells & fading fragment) */}
-          {botB.modules.map((cell) => renderTriangle(cell, botB))}
-        </g>
-
-        {/* ========================================================================= */}
-        {/* COLLISION PARTICLES & BREAKAWAY SHARDS EMITTER LAYER */}
-        {/* ========================================================================= */}
-        <g id="particle-emitter-layer" className="pointer-events-none">
-          {particles.map((p) => {
-            if (p.type === 'triangle') {
-              // Equilateral micro-triangle
-              const r = p.size;
-              const rad = (p.rotation * Math.PI) / 180;
-              const p1x = p.x + r * Math.cos(rad);
-              const p1y = p.y + r * Math.sin(rad);
-              const p2x = p.x + r * Math.cos(rad + (2 * Math.PI) / 3);
-              const p2y = p.y + r * Math.sin(rad + (2 * Math.PI) / 3);
-              const p3x = p.x + r * Math.cos(rad + (4 * Math.PI) / 3);
-              const p3y = p.y + r * Math.sin(rad + (4 * Math.PI) / 3);
-              return (
-                <polygon
-                  key={p.id}
-                  points={`${p1x.toFixed(1)},${p1y.toFixed(1)} ${p2x.toFixed(1)},${p2y.toFixed(1)} ${p3x.toFixed(1)},${p3y.toFixed(1)}`}
-                  fill={p.color}
-                  opacity={p.opacity}
-                  stroke={p.color === '#ffffff' ? '#f59e0b' : undefined}
-                  strokeWidth={p.color === '#ffffff' ? 0.6 : undefined}
-                />
-              );
-            } else if (p.type === 'shard') {
-              // Slender diamond / crystal shard
-              const rad = (p.rotation * Math.PI) / 180;
-              const cos = Math.cos(rad);
-              const sin = Math.sin(rad);
-              const w = p.size * 0.45;
-              const h = p.size * 1.3;
-              return (
-                <polygon
-                  key={p.id}
-                  points={`
-                    ${(p.x - sin * h).toFixed(1)},${(p.y + cos * h).toFixed(1)}
-                    ${(p.x + cos * w).toFixed(1)},${(p.y + sin * w).toFixed(1)}
-                    ${(p.x + sin * h).toFixed(1)},${(p.y - cos * h).toFixed(1)}
-                    ${(p.x - cos * w).toFixed(1)},${(p.y - sin * w).toFixed(1)}
-                  `}
-                  fill={p.color}
-                  opacity={p.opacity}
-                />
-              );
-            } else if (p.type === 'spark') {
-              // Directional kinetic friction spark
-              return (
-                <line
-                  key={p.id}
-                  x1={(p.x - p.vx * 2.5).toFixed(1)}
-                  y1={(p.y - p.vy * 2.5).toFixed(1)}
-                  x2={p.x.toFixed(1)}
-                  y2={p.y.toFixed(1)}
-                  stroke={p.color}
-                  strokeWidth={Math.max(0.8, p.size * 0.35)}
-                  strokeLinecap="round"
-                  opacity={p.opacity}
-                />
-              );
-            } else {
-              // Micro pulverized fracture dust
-              return (
-                <circle
-                  key={p.id}
-                  cx={p.x.toFixed(1)}
-                  cy={p.y.toFixed(1)}
-                  r={(p.size * 0.45).toFixed(1)}
-                  fill={p.color}
-                  opacity={p.opacity}
-                />
-              );
-            }
+        {/* 4.5 fracture lines, drawn per tile but only for the handful of tiles
+            that actually need one - a healthy body emits none. */}
+        {[
+          ...bots.a.tiles.map((t) => ({ team: 'A' as const, t })),
+          ...bots.b.tiles.map((t) => ({ team: 'B' as const, t })),
+        ]
+          .filter(({ t }) => t.hpRatioMilli < CRACK_BELOW_MILLI)
+          .map(({ team, t }) => {
+            const strong = t.hpRatioMilli < CRACK_STRONG_BELOW_MILLI;
+            return (
+              <line
+                key={`crack-${team}-${t.index}`}
+                x1={t.cx - 3}
+                y1={t.cy - 2}
+                x2={t.cx + 3}
+                y2={t.cy + 2}
+                stroke={ARENA.CRACK}
+                strokeWidth={strong ? 1.4 : 0.8}
+                opacity={strong ? 0.9 : 0.5}
+                className="pointer-events-none"
+              />
+            );
           })}
-        </g>
 
-        {/* Tactical Encounter HUD annotations */}
-        <g opacity="0.8" className="font-mono text-[10px]">
-          {/* Bot A Callout */}
-          <text x="260" y="235" fill="#991b1b" fontWeight="600">
-            ▲ SPEAR APEX [PENETRATING]
-          </text>
-          <line x1="330" y1="240" x2="495" y2="300" stroke="#dc2626" strokeWidth="0.8" strokeDasharray="2 2" />
+        {hoverInfo && !selectedInfo && (
+          <polygon
+            points={toPoints(hoverInfoTile(bots, hoverInfo.ref)?.verts ?? [])}
+            fill="none"
+            stroke={ARENA.SELECT}
+            strokeWidth="3"
+            strokeLinejoin="round"
+            opacity="0.6"
+            className="pointer-events-none"
+          />
+        )}
+        {selectedInfo && (
+          <polygon
+            points={toPoints(hoverInfoTile(bots, selectedInfo.ref)?.verts ?? [])}
+            fill="none"
+            stroke={ARENA.SELECT}
+            strokeWidth="3"
+            strokeLinejoin="round"
+            opacity="0.9"
+            className="pointer-events-none"
+          />
+        )}
 
-          {/* Collision Point Callout with dynamic damage alert */}
-          <text x="512" y="385" fill={isImpactShaking ? "#dc2626" : "#0f172a"} fontWeight="700" textAnchor="middle" className="transition-colors duration-150">
-            {isImpactShaking ? "⚡ KINETIC SHIELD COMPRESSION · REGISTERING DAMAGE" : "COLLISION SHEAR ZONE · Δt 0.02s"}
-          </text>
-          <text x="512" y="399" fill={isImpactShaking ? "#ea580c" : "#64748b"} textAnchor="middle" className="transition-colors duration-150">
-            Hammer → Scissor 2.0× Multiplier · Click to Strike
-          </text>
+        {renderCore(frame.a, bots.a.tiles)}
+        {renderCore(frame.b, bots.b.tiles)}
 
-          {/* Detached Fragment Callout */}
-          <text x="680" y="210" fill="#64748b" fontWeight="500">
-            ▲ B-31 DETACHED [FADING]
-          </text>
-          <line x1="675" y1="215" x2="520" y2="280" stroke="#94a3b8" strokeWidth="0.8" strokeDasharray="1 2" />
+        {/* 4.8 detached clusters, frozen in place and fading */}
+        {ghosts.map((g) => (
+          <polygon
+            key={g.key}
+            points={g.points}
+            fill={DETACHED_FILL}
+            stroke={DETACHED_STROKE}
+            strokeWidth="1"
+            opacity={g.alpha * 0.85}
+          />
+        ))}
 
-          {/* Bot B Exposed Core Callout */}
-          <text x="730" y="360" fill="#1d4ed8" fontWeight="600">
-            ● CORE EXPOSED [64% HP]
-          </text>
-          <line x1="725" y1="355" x2="570" y2="310" stroke="#2563eb" strokeWidth="0.8" strokeDasharray="2 2" />
-        </g>
+        {sparks.map((p) => (
+          <line
+            key={p.id}
+            x1={(p.x - p.dx * 0.6).toFixed(1)}
+            y1={(p.y - p.dy * 0.6).toFixed(1)}
+            x2={(p.x + p.dx).toFixed(1)}
+            y2={(p.y + p.dy).toFixed(1)}
+            stroke={p.color}
+            strokeWidth={p.r.toFixed(2)}
+            strokeLinecap="round"
+            opacity={p.alpha}
+          />
+        ))}
+
+        {vectorsActive && (
+          <g opacity="0.75">
+            {[frame.a, frame.b].map((bot) => {
+              const len = 60;
+              const a = (bot.heading / 64) * Math.PI * 2;
+              const x = 500 + bot.x * scale;
+              const y = 500 + bot.y * scale;
+              const color = tileSkin(bot.team, 'hammer').fill;
+              return (
+                <g key={bot.team}>
+                  <line
+                    x1={x}
+                    y1={y}
+                    x2={x + Math.cos(a) * len}
+                    y2={y + Math.sin(a) * len}
+                    stroke={color}
+                    strokeWidth="1.6"
+                    strokeDasharray="4 3"
+                  />
+                  <circle cx={x} cy={y} r="2.5" fill={color} />
+                </g>
+              );
+            })}
+          </g>
+        )}
       </svg>
 
-      {/* Floating Micro-HUD Tooltip on triangle hover */}
-      {hoveredTriangle && (
-        <div
-          className="absolute z-20 pointer-events-none bg-neutral-900/95 backdrop-blur-md text-white rounded-lg px-3 py-2 text-xs font-mono shadow-xl border border-neutral-700 min-w-[170px]"
-          style={{
-            left: `${Math.min(tooltipPos.x + 15, (containerRef.current?.clientWidth || 800) - 190)}px`,
-            top: `${Math.min(tooltipPos.y + 15, (containerRef.current?.clientHeight || 500) - 100)}px`,
-          }}
-        >
+      {hoverInfo && (
+        <div className="absolute top-3 left-1/2 -translate-x-1/2 z-30 pointer-events-none bg-neutral-900/95 backdrop-blur-md text-white rounded-lg px-3 py-2 text-[11px] font-mono shadow-xl border border-neutral-700 min-w-[190px]">
           <div className="flex items-center justify-between border-b border-neutral-700 pb-1 mb-1.5">
             <span className="font-bold text-amber-400">
-              CELL #{hoveredTriangle.id}
+              {hoverInfo.bot.name} · ô #{hoverInfo.tile.index}
             </span>
             <span className="text-[10px] uppercase text-neutral-400">
-              {hoveredTriangle.botId === 'A' ? 'Bot A' : 'Bot B'}
+              {hoverInfo.ref.team === 'A' ? 'Đội A' : 'Đội B'}
             </span>
           </div>
-          <div className="grid grid-cols-2 gap-x-2 gap-y-1 text-[11px]">
-            <span className="text-neutral-400">Type:</span>
-            <span className="font-semibold capitalize text-neutral-200">
-              {hoveredTriangle.type}
+          <div className="grid grid-cols-2 gap-x-2 gap-y-1">
+            <span className="text-neutral-400">Loại</span>
+            <span className="font-semibold capitalize">{hoverInfo.tile.type}</span>
+            <span className="text-neutral-400">Hướng</span>
+            <span className="font-semibold">{hoverInfo.tile.o === 'up' ? 'đỉnh tới' : 'đỉnh lui'}</span>
+            <span className="text-neutral-400">Máu</span>
+            <span className="font-semibold">
+              {hoverInfo.tile.hp}/{hoverInfo.tile.maxHp} ({(hoverInfo.tile.hpRatioMilli / 10).toFixed(0)}%)
             </span>
-            <span className="text-neutral-400">Status:</span>
-            <span
-              className={`font-semibold capitalize ${
-                hoveredTriangle.status === 'intact'
-                  ? 'text-emerald-400'
-                  : hoveredTriangle.status === 'detached'
-                  ? 'text-red-400'
-                  : 'text-amber-400'
-              }`}
-            >
-              {hoveredTriangle.status}
+            <span className="text-neutral-400">Đã nhận</span>
+            <span className="font-semibold text-orange-400">{hoverInfo.tile.damageReceived} sát thương</span>
+            <span className="text-neutral-400">Toạ độ</span>
+            <span className="font-semibold text-sky-400">
+              [{hoverInfo.tile.r}, {hoverInfo.tile.j}]
             </span>
-            <span className="text-neutral-400">HP:</span>
-            <span className="font-semibold text-neutral-200">{hoveredTriangle.hp}%</span>
-            <span className="text-neutral-400">Stress:</span>
-            <span className="font-semibold text-orange-400">{hoveredTriangle.stress}%</span>
-            {hoveredTriangle.gridC !== undefined && (
-              <>
-                <span className="text-neutral-400">Grid:</span>
-                <span className="font-semibold text-sky-400">
-                  [{hoveredTriangle.gridC}, {hoveredTriangle.gridR}]
-                </span>
-              </>
-            )}
           </div>
-          {hoveredTriangle.isCore && (
-            <div className="mt-1 pt-1 border-t border-red-900/60 text-[10px] text-red-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-              PRIMARY VITAL CORE
-            </div>
-          )}
-          {hoveredTriangle.status === 'detached' && (
-            <div className="mt-1 pt-1 border-t border-orange-900/60 text-[10px] text-orange-400 font-semibold flex items-center gap-1">
-              <span className="w-1.5 h-1.5 rounded-full bg-orange-500" />
-              BREAKAWAY DEBRIS SHARD
+          {hoverInfo.tile.isCore && (
+            <div className="mt-1 pt-1 border-t border-red-900/60 text-[10px] text-red-400 font-semibold">
+              LÕI — vỡ là thua ngay
             </div>
           )}
         </div>
       )}
+
+      <div className="absolute bottom-3 left-1/2 -translate-x-1/2 z-10 text-[10px] font-mono text-neutral-400">
+        nhịp {frame.tick} / {view.totalTicks} · {timeSec.toFixed(1)}s · bậc {quality.tier}
+      </div>
     </div>
   );
 };
+
+/** The projected tile behind a TileRef, for drawing its highlight. */
+function hoverInfoTile(
+  bots: { a: { tiles: ProjectedTile[] }; b: { tiles: ProjectedTile[] } },
+  ref: TileRef,
+): ProjectedTile | undefined {
+  const list = ref.team === 'A' ? bots.a.tiles : bots.b.tiles;
+  return list.find((t) => t.index === ref.index);
+}
+
+/**
+ * 3.6: the trail only appears above roughly 60% of top speed. Top speed is the
+ * 115% band, so the bar is 0.6 x 1.15 x FULL_SPEED_PER_TICK.
+ */
+function isMovingFast(view: ReplayView, team: 'A' | 'B', tick: number): boolean {
+  if (tick <= 0) return false;
+  const now = view.poseAt(team, tick);
+  const before = view.poseAt(team, tick - 1);
+  const moved = Math.hypot(now.x - before.x, now.y - before.y);
+  const topSpeed = view.rs.FULL_SPEED_PER_TICK * 1.15;
+  return moved > topSpeed * 0.6;
+}
+
+/**
+ * 3.4 compression from the most recent hit on this body.
+ *
+ * The amount comes from `impactMul` and the direction from the contact normal -
+ * NOT from `damage`. Two hits can share a damage number while looking completely
+ * different (a slow square-on stab versus a fast glancing scrape), and collapsing
+ * them onto one number would throw that distinction away.
+ */
+function squashAt(
+  view: ReplayView,
+  team: 'A' | 'B',
+  tick: number,
+): { amount: number; nx: number; ny: number } | null {
+  const window = FX.SQUASH_DECAY_TICKS;
+  let best: { amount: number; nx: number; ny: number } | null = null;
+  for (const e of view.eventsInRange(tick - window, tick)) {
+    if (e.kind !== 'hit' || e.defenderTeam !== team) continue;
+    const age = tick - e.tick;
+    const raw = (FX.SQUASH_MAX * (e.impactMul - 850)) / 150;
+    const amount = Math.max(0, Math.min(FX.SQUASH_MAX, raw)) * (1 - age / window);
+    if (amount <= 0) continue;
+    if (!best || amount > best.amount) best = { amount, nx: e.normal.x, ny: e.normal.y };
+  }
+  return best;
+}

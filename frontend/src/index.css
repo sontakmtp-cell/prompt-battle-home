@@ -49,3 +49,19 @@
 .animate-impact-shake-heavy {
   animation: arena-impact-shake-heavy 400ms cubic-bezier(0.36, 0.07, 0.19, 0.97) both;
 }
+
+/* Core pulse: the beat is driven from JS so it can speed up as the Core weakens
+   (ky_thuat_my_thuat.md 4.5), this only supplies the shape of the beat. */
+@keyframes pc-pulse {
+  0%, 100% { transform: scale(1); }
+  50% { transform: scale(1.28); }
+}
+
+/* Editor: the cell under the cursor in the lattice picker. */
+.lattice-cell-hit {
+  fill: transparent;
+  cursor: pointer;
+}
+.lattice-cell-hit:hover {
+  fill: rgba(15, 23, 42, 0.08);
+}
