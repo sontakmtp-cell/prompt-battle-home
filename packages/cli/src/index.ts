@@ -14,6 +14,7 @@ import {
   validateBot,
   verifyReplay,
 } from '@promptchien/core';
+import { safeProjectPath } from './paths.js';
 
 const ROOT = resolve(process.cwd());
 
@@ -28,13 +29,13 @@ function flag(name: string): boolean {
 }
 
 function loadBot(path: string): BotDefinition {
-  const abs = resolve(ROOT, path);
+  const abs = safeProjectPath(ROOT, path);
   const raw = readFileSync(abs, 'utf8');
   return JSON.parse(raw) as BotDefinition;
 }
 
 function writeOut(rel: string, content: string): string {
-  const abs = resolve(ROOT, rel);
+  const abs = safeProjectPath(ROOT, rel);
   mkdirSync(dirname(abs), { recursive: true });
   writeFileSync(abs, content, 'utf8');
   return abs;
@@ -129,7 +130,7 @@ function describeBot(s: { triangles: number; motors: number; loadMilli: number; 
 }
 
 function cmdReplay(path: string, aPath: string, bPath: string): void {
-  const saved = JSON.parse(readFileSync(resolve(ROOT, path), 'utf8')) as { replay: Replay };
+  const saved = JSON.parse(readFileSync(safeProjectPath(ROOT, path), 'utf8')) as { replay: Replay };
   const a = loadBot(aPath);
   const b = loadBot(bPath);
   const rs = DEFAULT_RULESET;
@@ -239,44 +240,57 @@ function usage(): void {
 }
 
 const cmd = process.argv[2] ?? 'help';
-switch (cmd) {
-  case 'bots':
-    cmdBots();
-    break;
-  case 'validate': {
-    const p = process.argv[3];
-    if (!p) throw new Error('validate needs a bot json path');
-    cmdValidate(p);
-    break;
-  }
-  case 'simulate': {
-    const a = process.argv[3];
-    const b = process.argv[4];
-    if (!a || !b) throw new Error('simulate needs two bot json paths');
-    cmdSimulate(a, b);
-    break;
-  }
-  case 'replay': {
-    const p = process.argv[3];
-    const a = process.argv[4];
-    const b = process.argv[5];
-    if (!p || !a || !b) throw new Error('replay needs <saved.json> <a.json> <b.json>');
-    cmdReplay(p, a, b);
-    break;
-  }
-  case 'hash100':
-    cmdHash100();
-    break;
-  case 'balance':
-    cmdBalance();
-    break;
-  case 'help':
-  default:
-    usage();
-    if (cmd !== 'help') process.exitCode = 1;
-    break;
-}
 
-if (flag('ensure-dirs') && !existsSync(resolve(ROOT, 'reports'))) {
-  mkdirSync(resolve(ROOT, 'reports'), { recursive: true });
+// Top-level safety net: any error raised while running a command is reported as
+// a single clean line on stderr, with a non-zero exit code and NO stack trace.
+// This covers a rejected path (ProjectPathError) as well as a bot JSON that
+// cannot be hashed (e.g. a non-integer coordinate reaching `lockBot`), so the
+// user gets a clear reason instead of a raw crash. The core/contracts packages
+// deliberately keep throwing — only the CLI's edge is softened here.
+try {
+  switch (cmd) {
+    case 'bots':
+      cmdBots();
+      break;
+    case 'validate': {
+      const p = process.argv[3];
+      if (!p) throw new Error('validate needs a bot json path');
+      cmdValidate(p);
+      break;
+    }
+    case 'simulate': {
+      const a = process.argv[3];
+      const b = process.argv[4];
+      if (!a || !b) throw new Error('simulate needs two bot json paths');
+      cmdSimulate(a, b);
+      break;
+    }
+    case 'replay': {
+      const p = process.argv[3];
+      const a = process.argv[4];
+      const b = process.argv[5];
+      if (!p || !a || !b) throw new Error('replay needs <saved.json> <a.json> <b.json>');
+      cmdReplay(p, a, b);
+      break;
+    }
+    case 'hash100':
+      cmdHash100();
+      break;
+    case 'balance':
+      cmdBalance();
+      break;
+    case 'help':
+    default:
+      usage();
+      if (cmd !== 'help') process.exitCode = 1;
+      break;
+  }
+
+  if (flag('ensure-dirs') && !existsSync(safeProjectPath(ROOT, 'reports'))) {
+    mkdirSync(safeProjectPath(ROOT, 'reports'), { recursive: true });
+  }
+} catch (err) {
+  const message = err instanceof Error ? err.message : String(err);
+  process.stderr.write(`error: ${message}\n`);
+  process.exitCode = 1;
 }
